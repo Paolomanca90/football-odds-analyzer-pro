@@ -1,114 +1,46 @@
-// initDatabase.js - Inizializzazione completa database SQLite
+// scripts/initDatabase.js - Inizializzazione corretta per dati persistenti
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'football_data.db');
+const DB_PATH = './football_stats.db'; // Cambiato nome per evitare conflitti
 
-class DatabaseInitializer {
+class RealDataDatabase {
     constructor() {
         this.db = new sqlite3.Database(DB_PATH);
     }
 
     async initialize() {
-        console.log('🔧 Inizializzazione database SQLite...');
+        console.log('🔧 Inizializzazione database per dati reali...');
         
         return new Promise((resolve, reject) => {
             this.db.serialize(() => {
-                // 1. Tabella leagues (campionati)
-                this.db.run(`CREATE TABLE IF NOT EXISTS leagues (
-                    id TEXT PRIMARY KEY,
+                // 1. Tabella teams (squadre con ID API reali)
+                this.db.run(`CREATE TABLE IF NOT EXISTS teams (
+                    id INTEGER PRIMARY KEY,
+                    api_id INTEGER UNIQUE NOT NULL,
                     name TEXT NOT NULL,
-                    country TEXT NOT NULL,
-                    flag TEXT,
-                    season_start INTEGER,
-                    season_end INTEGER,
-                    current_matchday INTEGER DEFAULT 1,
-                    total_teams INTEGER DEFAULT 20,
-                    api_id TEXT,
-                    status TEXT DEFAULT 'active',
+                    short_name TEXT,
+                    tla TEXT,
+                    country TEXT,
+                    founded INTEGER,
+                    venue TEXT,
+                    logo_url TEXT,
+                    current_league_id TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )`, (err) => {
-                    if (err) console.error('Error creating leagues table:', err);
-                    else console.log('✅ Tabella leagues creata');
-                });
-
-                // 2. Tabella matches (partite)
-                this.db.run(`CREATE TABLE IF NOT EXISTS matches (
-                    id TEXT PRIMARY KEY,
-                    season INTEGER NOT NULL,
-                    matchday INTEGER,
-                    league_id TEXT NOT NULL,
-                    home_team_id INTEGER NOT NULL,
-                    away_team_id INTEGER NOT NULL,
-                    home_team_name TEXT NOT NULL,
-                    away_team_name TEXT NOT NULL,
-                    match_date TEXT NOT NULL,
-                    venue TEXT,
-                    referee TEXT,
-                    home_score INTEGER DEFAULT NULL,
-                    away_score INTEGER DEFAULT NULL,
-                    ht_home_score INTEGER DEFAULT NULL,
-                    ht_away_score INTEGER DEFAULT NULL,
-                    status TEXT DEFAULT 'SCHEDULED',
-                    competition_stage TEXT DEFAULT 'REGULAR_SEASON',
-                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    api_last_fetch DATETIME,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(league_id) REFERENCES leagues(id)
-                )`, (err) => {
-                    if (err) console.error('Error creating matches table:', err);
-                    else console.log('✅ Tabella matches creata');
-                });
-
-                // 3. Tabella teams (squadre)
-                this.db.run(`CREATE TABLE IF NOT EXISTS teams (
-                    id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,
-                    short_name TEXT,
-                    tla TEXT, -- Three Letter Abbreviation
-                    logo_url TEXT,
-                    founded INTEGER,
-                    club_colors TEXT,
-                    venue TEXT,
-                    website TEXT,
-                    league_id TEXT,
-                    current_elo_rating REAL DEFAULT 1500,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(league_id) REFERENCES leagues(id)
-                )`, (err) => {
-                    if (err) console.error('Error creating teams table:', err);
+                    if (err) console.error('❌ Error creating teams table:', err);
                     else console.log('✅ Tabella teams creata');
                 });
 
-                // 4. Tabella odds (quote)
-                this.db.run(`CREATE TABLE IF NOT EXISTS odds (
+                // 2. Statistiche stagionali REALI (dati persistenti!)
+                this.db.run(`CREATE TABLE IF NOT EXISTS team_season_stats (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    match_id TEXT NOT NULL,
-                    market_type TEXT NOT NULL,
-                    outcome TEXT NOT NULL,
-                    odds_value REAL NOT NULL,
-                    bookmaker TEXT DEFAULT 'system',
-                    probability REAL,
-                    is_value_bet BOOLEAN DEFAULT 0,
-                    value_percentage REAL DEFAULT 0,
-                    confidence_score REAL DEFAULT 0,
-                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(match_id) REFERENCES matches(id)
-                )`, (err) => {
-                    if (err) console.error('Error creating odds table:', err);
-                    else console.log('✅ Tabella odds creata');
-                });
-
-                // 5. Tabella team_stats (statistiche squadre)
-                this.db.run(`CREATE TABLE IF NOT EXISTS team_stats (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    team_id INTEGER NOT NULL,
+                    team_api_id INTEGER NOT NULL,
                     team_name TEXT NOT NULL,
                     season INTEGER NOT NULL,
                     league_id TEXT NOT NULL,
+                    competition_name TEXT,
                     matches_played INTEGER DEFAULT 0,
                     wins INTEGER DEFAULT 0,
                     draws INTEGER DEFAULT 0,
@@ -117,164 +49,191 @@ class DatabaseInitializer {
                     goals_against INTEGER DEFAULT 0,
                     goal_difference INTEGER DEFAULT 0,
                     points INTEGER DEFAULT 0,
+                    
+                    -- Statistiche Casa
+                    home_matches INTEGER DEFAULT 0,
                     home_wins INTEGER DEFAULT 0,
                     home_draws INTEGER DEFAULT 0,
                     home_losses INTEGER DEFAULT 0,
                     home_goals_for INTEGER DEFAULT 0,
                     home_goals_against INTEGER DEFAULT 0,
+                    
+                    -- Statistiche Trasferta
+                    away_matches INTEGER DEFAULT 0,
                     away_wins INTEGER DEFAULT 0,
                     away_draws INTEGER DEFAULT 0,
                     away_losses INTEGER DEFAULT 0,
                     away_goals_for INTEGER DEFAULT 0,
                     away_goals_against INTEGER DEFAULT 0,
+                    
+                    -- Statistiche Speciali
                     clean_sheets INTEGER DEFAULT 0,
                     failed_to_score INTEGER DEFAULT 0,
-                    btts_count INTEGER DEFAULT 0,
-                    over_25_count INTEGER DEFAULT 0,
-                    under_25_count INTEGER DEFAULT 0,
-                    avg_goals_for REAL DEFAULT 0,
-                    avg_goals_against REAL DEFAULT 0,
-                    btts_percentage REAL DEFAULT 0,
-                    over_25_percentage REAL DEFAULT 0,
-                    clean_sheet_percentage REAL DEFAULT 0,
-                    win_percentage REAL DEFAULT 0,
-                    form_points REAL DEFAULT 0,
-                    strength_rating REAL DEFAULT 50,
-                    attack_strength REAL DEFAULT 50,
-                    defense_strength REAL DEFAULT 50,
-                    last_5_form TEXT, -- WWLDW format
+                    btts_matches INTEGER DEFAULT 0,
+                    over_15_matches INTEGER DEFAULT 0,
+                    over_25_matches INTEGER DEFAULT 0,
+                    over_35_matches INTEGER DEFAULT 0,
+                    under_25_matches INTEGER DEFAULT 0,
+                    
+                    -- Metadata
+                    data_source TEXT DEFAULT 'football_data_api',
+                    api_last_fetch DATETIME,
+                    is_complete BOOLEAN DEFAULT 1,
                     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(team_id) REFERENCES teams(id),
-                    FOREIGN KEY(league_id) REFERENCES leagues(id),
-                    UNIQUE(team_id, season, league_id)
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    
+                    UNIQUE(team_api_id, season, league_id)
                 )`, (err) => {
-                    if (err) console.error('Error creating team_stats table:', err);
-                    else console.log('✅ Tabella team_stats creata');
+                    if (err) console.error('❌ Error creating team_season_stats table:', err);
+                    else console.log('✅ Tabella team_season_stats creata');
                 });
 
-                // 6. Tabella head_to_head (scontri diretti)
-                this.db.run(`CREATE TABLE IF NOT EXISTS head_to_head (
+                // 3. Head-to-Head matches REALI (scontri storici veri)
+                this.db.run(`CREATE TABLE IF NOT EXISTS head_to_head_matches (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    team1_id INTEGER NOT NULL,
-                    team2_id INTEGER NOT NULL,
+                    match_api_id INTEGER UNIQUE,
+                    team1_api_id INTEGER NOT NULL,
+                    team2_api_id INTEGER NOT NULL,
                     team1_name TEXT NOT NULL,
                     team2_name TEXT NOT NULL,
-                    total_matches INTEGER DEFAULT 0,
-                    team1_wins INTEGER DEFAULT 0,
-                    team2_wins INTEGER DEFAULT 0,
-                    draws INTEGER DEFAULT 0,
-                    team1_goals INTEGER DEFAULT 0,
-                    team2_goals INTEGER DEFAULT 0,
-                    recent_matches_json TEXT, -- JSON degli ultimi scontri
-                    team1_wins_home INTEGER DEFAULT 0,
-                    team1_wins_away INTEGER DEFAULT 0,
-                    team2_wins_home INTEGER DEFAULT 0,
-                    team2_wins_away INTEGER DEFAULT 0,
-                    avg_total_goals REAL DEFAULT 0,
-                    btts_percentage REAL DEFAULT 0,
-                    over_25_percentage REAL DEFAULT 0,
-                    home_advantage_percentage REAL DEFAULT 0,
-                    last_meeting_date TEXT,
-                    last_meeting_score TEXT,
-                    seasons_analyzed INTEGER DEFAULT 5,
-                    confidence_score REAL DEFAULT 0,
-                    predictive_trend TEXT, -- JSON con trend predittivi
+                    
+                    -- Dettagli Match
+                    match_date TEXT NOT NULL,
+                    season INTEGER NOT NULL,
+                    matchday INTEGER,
+                    home_team_api_id INTEGER NOT NULL,
+                    away_team_api_id INTEGER NOT NULL,
+                    home_team_name TEXT NOT NULL,
+                    away_team_name TEXT NOT NULL,
+                    
+                    -- Risultato
+                    home_goals INTEGER NOT NULL,
+                    away_goals INTEGER NOT NULL,
+                    total_goals INTEGER GENERATED ALWAYS AS (home_goals + away_goals) STORED,
+                    match_result TEXT NOT NULL, -- 'home', 'draw', 'away'
+                    is_btts BOOLEAN GENERATED ALWAYS AS (home_goals > 0 AND away_goals > 0) STORED,
+                    is_over_25 BOOLEAN GENERATED ALWAYS AS (home_goals + away_goals > 2.5) STORED,
+                    
+                    -- Metadata
+                    competition_name TEXT,
+                    competition_type TEXT,
+                    venue TEXT,
+                    status TEXT DEFAULT 'FINISHED',
+                    data_source TEXT DEFAULT 'football_data_api',
                     last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(team1_id) REFERENCES teams(id),
-                    FOREIGN KEY(team2_id) REFERENCES teams(id),
-                    UNIQUE(team1_id, team2_id)
+                    
+                    UNIQUE(team1_api_id, team2_api_id, match_date)
                 )`, (err) => {
-                    if (err) console.error('Error creating head_to_head table:', err);
-                    else console.log('✅ Tabella head_to_head creata');
+                    if (err) console.error('❌ Error creating head_to_head_matches table:', err);
+                    else console.log('✅ Tabella head_to_head_matches creata');
                 });
 
-                // 7. Tabella value_bets (scommesse di valore)
-                this.db.run(`CREATE TABLE IF NOT EXISTS value_bets (
+                // 4. Cache API per evitare chiamate eccessive
+                this.db.run(`CREATE TABLE IF NOT EXISTS api_cache (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    match_id TEXT NOT NULL,
-                    home_team TEXT NOT NULL,
-                    away_team TEXT NOT NULL,
-                    league_id TEXT NOT NULL,
-                    match_date TEXT NOT NULL,
-                    market_type TEXT NOT NULL,
-                    outcome TEXT NOT NULL,
-                    bookmaker_odds REAL NOT NULL,
-                    fair_odds REAL NOT NULL,
-                    real_probability REAL NOT NULL,
-                    implied_probability REAL NOT NULL,
-                    value_percentage REAL NOT NULL,
-                    confidence_score REAL NOT NULL,
-                    kelly_percentage REAL DEFAULT 0,
-                    expected_roi REAL DEFAULT 0,
-                    risk_level TEXT DEFAULT 'medium',
-                    bet_size_recommendation REAL DEFAULT 0,
-                    status TEXT DEFAULT 'active',
-                    notes TEXT,
-                    algorithm_version TEXT DEFAULT 'v1.0',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    expires_at DATETIME,
-                    FOREIGN KEY(match_id) REFERENCES matches(id),
-                    FOREIGN KEY(league_id) REFERENCES leagues(id)
-                )`, (err) => {
-                    if (err) console.error('Error creating value_bets table:', err);
-                    else console.log('✅ Tabella value_bets creata');
-                });
-
-                // 8. Tabella predictions (predizioni AI)
-                this.db.run(`CREATE TABLE IF NOT EXISTS predictions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    match_id TEXT NOT NULL,
-                    home_team_id INTEGER NOT NULL,
-                    away_team_id INTEGER NOT NULL,
-                    predicted_home_goals REAL NOT NULL,
-                    predicted_away_goals REAL NOT NULL,
-                    predicted_total_goals REAL NOT NULL,
-                    home_win_probability REAL NOT NULL,
-                    draw_probability REAL NOT NULL,
-                    away_win_probability REAL NOT NULL,
-                    btts_probability REAL NOT NULL,
-                    over_25_probability REAL NOT NULL,
-                    under_25_probability REAL NOT NULL,
-                    correct_score_predictions TEXT, -- JSON con probabilità risultati esatti
-                    poisson_predictions TEXT, -- JSON con distribuzione Poisson
-                    home_clean_sheet_probability REAL DEFAULT 0,
-                    away_clean_sheet_probability REAL DEFAULT 0,
-                    first_goal_probabilities TEXT, -- JSON con probabilità primo gol
-                    model_confidence REAL NOT NULL,
-                    algorithm_version TEXT DEFAULT 'v1.0',
-                    input_features TEXT, -- JSON con feature utilizzate
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(match_id) REFERENCES matches(id),
-                    FOREIGN KEY(home_team_id) REFERENCES teams(id),
-                    FOREIGN KEY(away_team_id) REFERENCES teams(id)
-                )`, (err) => {
-                    if (err) console.error('Error creating predictions table:', err);
-                    else console.log('✅ Tabella predictions creata');
-                });
-
-                // 9. Tabella bookmakers (bookmaker)
-                this.db.run(`CREATE TABLE IF NOT EXISTS bookmakers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE,
-                    display_name TEXT NOT NULL,
-                    country TEXT,
-                    website TEXT,
-                    api_key TEXT,
-                    margin_percentage REAL DEFAULT 5.0,
-                    reliability_score REAL DEFAULT 7.0,
-                    update_frequency INTEGER DEFAULT 300, -- seconds
-                    supported_markets TEXT, -- JSON array
-                    is_active BOOLEAN DEFAULT 1,
-                    last_update DATETIME,
+                    cache_key TEXT UNIQUE NOT NULL,
+                    endpoint TEXT NOT NULL,
+                    request_params TEXT, -- JSON
+                    response_data TEXT NOT NULL, -- JSON
+                    expires_at DATETIME NOT NULL,
+                    hit_count INTEGER DEFAULT 1,
+                    last_hit DATETIME DEFAULT CURRENT_TIMESTAMP,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )`, (err) => {
-                    if (err) console.error('Error creating bookmakers table:', err);
-                    else console.log('✅ Tabella bookmakers creata');
+                    if (err) console.error('❌ Error creating api_cache table:', err);
+                    else console.log('✅ Tabella api_cache creata');
                 });
 
-                // Crea indici per ottimizzare le performance
+                // 5. Competitions (campionati)
+                this.db.run(`CREATE TABLE IF NOT EXISTS competitions (
+                    id TEXT PRIMARY KEY,
+                    api_id INTEGER UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    code TEXT,
+                    type TEXT,
+                    country TEXT,
+                    country_code TEXT,
+                    country_flag TEXT,
+                    current_season_id INTEGER,
+                    current_matchday INTEGER,
+                    total_teams INTEGER DEFAULT 20,
+                    total_matchdays INTEGER DEFAULT 38,
+                    plan TEXT DEFAULT 'TIER_ONE',
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+                )`, (err) => {
+                    if (err) console.error('❌ Error creating competitions table:', err);
+                    else console.log('✅ Tabella competitions creata');
+                });
+
+                // 6. Seasons
+                this.db.run(`CREATE TABLE IF NOT EXISTS seasons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    api_id INTEGER UNIQUE,
+                    competition_id TEXT NOT NULL,
+                    year INTEGER NOT NULL,
+                    start_date TEXT,
+                    end_date TEXT,
+                    current_matchday INTEGER DEFAULT 1,
+                    is_current BOOLEAN DEFAULT 0,
+                    winner_name TEXT,
+                    total_matches INTEGER,
+                    matches_finished INTEGER DEFAULT 0,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(competition_id) REFERENCES competitions(id)
+                )`, (err) => {
+                    if (err) console.error('❌ Error creating seasons table:', err);
+                    else console.log('✅ Tabella seasons creata');
+                });
+
+                // 7. Matches attuali (per il frontend)
+                this.db.run(`CREATE TABLE IF NOT EXISTS current_matches (
+                    id TEXT PRIMARY KEY,
+                    api_id INTEGER UNIQUE,
+                    competition_id TEXT NOT NULL,
+                    season_id INTEGER,
+                    matchday INTEGER,
+                    status TEXT NOT NULL,
+                    utc_date TEXT NOT NULL,
+                    home_team_api_id INTEGER NOT NULL,
+                    away_team_api_id INTEGER NOT NULL,
+                    home_team_name TEXT NOT NULL,
+                    away_team_name TEXT NOT NULL,
+                    home_score INTEGER,
+                    away_score INTEGER,
+                    venue TEXT,
+                    referee TEXT,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(competition_id) REFERENCES competitions(id)
+                )`, (err) => {
+                    if (err) console.error('❌ Error creating current_matches table:', err);
+                    else console.log('✅ Tabella current_matches creata');
+                });
+
+                // 8. Analysis results (per cachare calcoli complessi)
+                this.db.run(`CREATE TABLE IF NOT EXISTS analysis_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    match_id TEXT NOT NULL,
+                    home_team_api_id INTEGER NOT NULL,
+                    away_team_api_id INTEGER NOT NULL,
+                    analysis_type TEXT NOT NULL, -- 'probabilities', 'suggestions', 'insights'
+                    result_data TEXT NOT NULL, -- JSON
+                    confidence_score REAL,
+                    data_quality_score INTEGER,
+                    algorithm_version TEXT DEFAULT 'v1.0',
+                    expires_at DATETIME NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(match_id, analysis_type)
+                )`, (err) => {
+                    if (err) console.error('❌ Error creating analysis_results table:', err);
+                    else console.log('✅ Tabella analysis_results creata');
+                });
+
+                // Crea indici per performance
                 this.createIndexes();
+                
+                // Inserisci dati iniziali
+                this.seedInitialData();
                 
                 console.log('🎯 Database inizializzato con successo!');
                 resolve();
@@ -285,42 +244,144 @@ class DatabaseInitializer {
     createIndexes() {
         console.log('📊 Creazione indici per ottimizzazione...');
 
-        // Indici per matches
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_league_date ON matches(league_id, match_date)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_team_id, away_team_id)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_season ON matches(season, league_id)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status)`);
+        // Indici per team_season_stats
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_team_season ON team_season_stats(team_api_id, season DESC)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_league_season ON team_season_stats(league_id, season DESC)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_team_name_season ON team_season_stats(team_name, season DESC)`);
 
-        // Indici per odds
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_odds_match_market ON odds(match_id, market_type)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_odds_value_bets ON odds(is_value_bet, value_percentage)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_odds_bookmaker ON odds(bookmaker)`);
+        // Indici per head_to_head_matches
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_h2h_teams ON head_to_head_matches(team1_api_id, team2_api_id)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_h2h_reverse ON head_to_head_matches(team2_api_id, team1_api_id)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_h2h_date ON head_to_head_matches(match_date DESC)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_h2h_season ON head_to_head_matches(season DESC)`);
 
-        // Indici per team_stats
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_team_stats_team_season ON team_stats(team_id, season)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_team_stats_league ON team_stats(league_id, season)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_team_stats_strength ON team_stats(strength_rating)`);
+        // Indici per api_cache
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_cache_key ON api_cache(cache_key)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_cache_expires ON api_cache(expires_at)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_cache_endpoint ON api_cache(endpoint)`);
 
-        // Indici per head_to_head
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_h2h_teams ON head_to_head(team1_id, team2_id)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_h2h_confidence ON head_to_head(confidence_score)`);
+        // Indici per current_matches
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_competition ON current_matches(competition_id, utc_date)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_teams ON current_matches(home_team_api_id, away_team_api_id)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_date ON current_matches(utc_date)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_matches_status ON current_matches(status)`);
 
-        // Indici per value_bets
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_value_bets_active ON value_bets(status, value_percentage)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_value_bets_league_date ON value_bets(league_id, match_date)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_value_bets_confidence ON value_bets(confidence_score)`);
-
-        // Indici per predictions
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_predictions_match ON predictions(match_id)`);
-        this.db.run(`CREATE INDEX IF NOT EXISTS idx_predictions_confidence ON predictions(model_confidence)`);
+        // Indici per analysis_results
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_analysis_match ON analysis_results(match_id, analysis_type)`);
+        this.db.run(`CREATE INDEX IF NOT EXISTS idx_analysis_expires ON analysis_results(expires_at)`);
 
         console.log('✅ Indici creati per ottimizzazione performance');
     }
 
-    close() {
+    seedInitialData() {
+        console.log('🌱 Inserimento dati iniziali...');
+
+        // Inserisci competizioni principali
+        const competitions = [
+            { id: 'SA', api_id: 2019, name: 'Serie A', code: 'SA', country: 'Italy', country_code: 'IT', country_flag: '🇮🇹' },
+            { id: 'PL', api_id: 2021, name: 'Premier League', code: 'PL', country: 'England', country_code: 'GB-ENG', country_flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿' },
+            { id: 'BL1', api_id: 2002, name: 'Bundesliga', code: 'BL1', country: 'Germany', country_code: 'DE', country_flag: '🇩🇪' },
+            { id: 'FL1', api_id: 2015, name: 'Ligue 1', code: 'FL1', country: 'France', country_code: 'FR', country_flag: '🇫🇷' },
+            { id: 'PD', api_id: 2014, name: 'Primera División', code: 'PD', country: 'Spain', country_code: 'ES', country_flag: '🇪🇸' },
+            { id: 'DED', api_id: 2003, name: 'Eredivisie', code: 'DED', country: 'Netherlands', country_code: 'NL', country_flag: '🇳🇱' },
+            { id: 'PPL', api_id: 2017, name: 'Primeira Liga', code: 'PPL', country: 'Portugal', country_code: 'PT', country_flag: '🇵🇹' },
+            { id: 'CL', api_id: 2001, name: 'UEFA Champions League', code: 'CL', country: 'Europe', country_code: 'EU', country_flag: '🌍' }
+        ];
+
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO competitions 
+            (id, api_id, name, code, country, country_code, country_flag) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        competitions.forEach(comp => {
+            stmt.run([comp.id, comp.api_id, comp.name, comp.code, comp.country, comp.country_code, comp.country_flag]);
+        });
+
+        stmt.finalize();
+
+        // Inserisci stagioni recenti
+        const currentYear = new Date().getFullYear();
+        const seasonStmt = this.db.prepare(`
+            INSERT OR REPLACE INTO seasons 
+            (competition_id, year, is_current) 
+            VALUES (?, ?, ?)
+        `);
+
+        competitions.forEach(comp => {
+            for (let year = currentYear - 4; year <= currentYear; year++) {
+                const isCurrent = year === currentYear;
+                seasonStmt.run([comp.id, year, isCurrent ? 1 : 0]);
+            }
+        });
+
+        seasonStmt.finalize();
+
+        console.log('✅ Dati iniziali inseriti');
+    }
+
+    // Utility methods
+    async cleanExpiredCache() {
+        return new Promise((resolve) => {
+            this.db.run(
+                'DELETE FROM api_cache WHERE expires_at < datetime("now")',
+                [],
+                function(err) {
+                    if (err) console.error('❌ Error cleaning cache:', err);
+                    else console.log(`🧹 Cleaned ${this.changes} expired cache entries`);
+                    resolve();
+                }
+            );
+        });
+    }
+
+    async cleanExpiredAnalysis() {
+        return new Promise((resolve) => {
+            this.db.run(
+                'DELETE FROM analysis_results WHERE expires_at < datetime("now")',
+                [],
+                function(err) {
+                    if (err) console.error('❌ Error cleaning analysis:', err);
+                    else console.log(`🧹 Cleaned ${this.changes} expired analysis results`);
+                    resolve();
+                }
+            );
+        });
+    }
+
+    async getDbStats() {
+        return new Promise((resolve) => {
+            const stats = {};
+            
+            this.db.serialize(() => {
+                this.db.get('SELECT COUNT(*) as count FROM teams', (err, row) => {
+                    stats.teams = row?.count || 0;
+                });
+                
+                this.db.get('SELECT COUNT(*) as count FROM team_season_stats', (err, row) => {
+                    stats.seasonStats = row?.count || 0;
+                });
+                
+                this.db.get('SELECT COUNT(*) as count FROM head_to_head_matches', (err, row) => {
+                    stats.h2hMatches = row?.count || 0;
+                });
+                
+                this.db.get('SELECT COUNT(*) as count FROM api_cache', (err, row) => {
+                    stats.cacheEntries = row?.count || 0;
+                });
+                
+                this.db.get('SELECT COUNT(*) as count FROM current_matches', (err, row) => {
+                    stats.currentMatches = row?.count || 0;
+                    resolve(stats);
+                });
+            });
+        });
+    }
+
+    async close() {
         return new Promise((resolve) => {
             this.db.close((err) => {
-                if (err) console.error('Error closing database:', err);
+                if (err) console.error('❌ Error closing database:', err);
                 else console.log('📦 Database connection closed');
                 resolve();
             });
@@ -328,19 +389,91 @@ class DatabaseInitializer {
     }
 }
 
-// Esegui inizializzazione se script chiamato direttamente
-if (require.main === module) {
-    const initializer = new DatabaseInitializer();
-    
-    initializer.initialize()
-        .then(() => {
-            console.log('🚀 Inizializzazione completata con successo!');
-            return initializer.close();
-        })
-        .catch((error) => {
-            console.error('❌ Errore durante inizializzazione:', error);
-            process.exit(1);
-        });
+// Helper functions per manutenzione
+class DatabaseMaintenance {
+    static async performMaintenance() {
+        const db = new RealDataDatabase();
+        await db.cleanExpiredCache();
+        await db.cleanExpiredAnalysis();
+        
+        const stats = await db.getDbStats();
+        console.log('📊 Database Statistics:');
+        console.table(stats);
+        
+        await db.close();
+    }
+
+    static async resetDatabase() {
+        const fs = require('fs');
+        if (fs.existsSync(DB_PATH)) {
+            fs.unlinkSync(DB_PATH);
+            console.log('🗑️ Database file deleted');
+        }
+        
+        const db = new RealDataDatabase();
+        await db.initialize();
+        await db.close();
+        console.log('🔄 Database reset complete');
+    }
+
+    static async backupDatabase() {
+        const fs = require('fs');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = `./backups/football_stats_${timestamp}.db`;
+        
+        // Crea directory backup se non esiste
+        if (!fs.existsSync('./backups')) {
+            fs.mkdirSync('./backups', { recursive: true });
+        }
+        
+        fs.copyFileSync(DB_PATH, backupPath);
+        console.log(`💾 Database backed up to: ${backupPath}`);
+    }
 }
 
-module.exports = DatabaseInitializer;
+// Esegui inizializzazione se script chiamato direttamente
+if (require.main === module) {
+    const args = process.argv.slice(2);
+    const command = args[0];
+    
+    if (command === 'reset') {
+        DatabaseMaintenance.resetDatabase()
+            .then(() => process.exit(0))
+            .catch(err => {
+                console.error('❌ Reset failed:', err);
+                process.exit(1);
+            });
+    } else if (command === 'maintenance') {
+        DatabaseMaintenance.performMaintenance()
+            .then(() => process.exit(0))
+            .catch(err => {
+                console.error('❌ Maintenance failed:', err);
+                process.exit(1);
+            });
+    } else if (command === 'backup') {
+        DatabaseMaintenance.backupDatabase()
+            .then(() => process.exit(0))
+            .catch(err => {
+                console.error('❌ Backup failed:', err);
+                process.exit(1);
+            });
+    } else {
+        // Inizializzazione standard
+        const db = new RealDataDatabase();
+        
+        db.initialize()
+            .then(async () => {
+                console.log('🚀 Inizializzazione completata con successo!');
+                const stats = await db.getDbStats();
+                console.log('📊 Database Statistics:');
+                console.table(stats);
+                return db.close();
+            })
+            .catch((error) => {
+                console.error('❌ Errore durante inizializzazione:', error);
+                process.exit(1);
+            });
+    }
+}
+
+module.exports = { RealDataDatabase, DatabaseMaintenance };
