@@ -1,0 +1,57 @@
+{
+  "name": "football-odds-analyzer-pro",
+  "version": "1.0.0",
+  "description": "Sistema completo per analisi odds calcistiche con backend Node.js e frontend React",
+  "main": "server.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server.js",
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "start": "node server.js",
+    "setup": "npm install && cd client && npm install",
+    "db:init": "node scripts/initDatabase.js",
+    "db:seed": "node scripts/seedDatabase.js",
+    "test": "jest",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0",
+    "sqlite3": "^5.1.6",
+    "dotenv": "^16.3.1",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "compression": "^1.7.4",
+    "node-cron": "^3.0.3",
+    "moment": "^2.29.4",
+    "lodash": "^4.17.21",
+    "mathjs": "^12.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "concurrently": "^8.2.2",
+    "jest": "^29.7.0",
+    "eslint": "^8.52.0",
+    "prettier": "^3.0.3",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "football",
+    "betting",
+    "odds",
+    "analytics",
+    "value-betting",
+    "statistics",
+    "machine-learning",
+    "react",
+    "nodejs"
+  ],
+  "license": "MIT"
+}
