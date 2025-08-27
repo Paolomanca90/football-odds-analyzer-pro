@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.db
+*.bak
+*.backup
+*.tmp
+*.temp
+.env
