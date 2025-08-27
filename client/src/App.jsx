@@ -467,7 +467,11 @@ const FootballStatsApp = () => {
         </div>
 
         <div className="bg-white p-6 rounded-xl border shadow-sm">
-          < HeadToHeadDisplay h2hData={probabilities.h2hData} homeTeam={homeTeam} awayTeam={awayTeam}  />
+          <HeadToHeadDisplay 
+                    h2hData={selectedMatch.h2hData} 
+                    homeTeam={selectedMatch.homeTeam?.name}
+                    awayTeam={selectedMatch.awayTeam?.name}
+                  />
         </div>
       </div>
     );
@@ -643,6 +647,13 @@ const FootballStatsApp = () => {
 
   // Componente H2H Display
   const HeadToHeadDisplay = ({ h2hData, homeTeam, awayTeam }) => {
+    console.log('HeadToHead Debug:', {
+        h2hData,
+        homeTeam,
+        awayTeam,
+        hasMatches: h2hData?.matches?.length,
+        hasSummary: !!h2hData?.summary
+    });
     if (!h2hData || !h2hData.matches || h2hData.matches.length === 0) {
       console.log('🔍 HeadToHead Debug: No H2H data available', { homeTeam, awayTeam, h2hData });
       return (
@@ -1401,7 +1412,11 @@ const FootballStatsApp = () => {
                     Probabilità Statistiche Complete
                   </h3>
                   
-                  <ProbabilitiesDisplay probabilities={selectedMatch.probabilities} awayTeam={selectedMatch.awayTeam} homeTeam={selectedMatch.homeTeam} />
+                  <ProbabilitiesDisplay 
+                    probabilities={selectedMatch.probabilities}
+                    homeTeam={selectedMatch.homeTeam?.name}
+                    awayTeam={selectedMatch.awayTeam?.name}
+                  />
                 </div>
 
                 {/* Sidebar con Analisi */}
