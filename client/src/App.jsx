@@ -366,9 +366,6 @@ const FootballStatsApp = () => {
               >
                 <option value="date">Data (Prima le Vecchie)</option>
                 <option value="date_desc">Data (Prima le Nuove)</option>
-                <option value="home">Squadra Casa</option>
-                <option value="status">Status</option>
-                <option value="confidence">Confidenza</option>
               </select>
             </div>
           </div>
