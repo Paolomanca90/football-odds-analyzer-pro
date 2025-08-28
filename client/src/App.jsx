@@ -27,7 +27,6 @@ const FootballStatsApp = () => {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMatch, setSelectedMatch] = useState(null);
-  const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState('');
   const [sortBy, setSortBy] = useState('date');
   const [filterStatus, setFilterStatus] = useState('all'); // NEW: Filtro per status
@@ -60,7 +59,6 @@ const FootballStatsApp = () => {
       
       if (response.data.success) {
         setMatches(response.data.matches);
-        setLastUpdate(new Date());
         
         console.log(`✅ Loaded ${response.data.matches.length} matches`);
         console.log(`📊 Metadata:`, response.data.metadata);
@@ -274,22 +272,9 @@ const FootballStatsApp = () => {
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 text-white p-8 shadow-xl">
         <div className="max-w-7xl mx-auto">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-4xl font-bold mb-2">⚽ Football Statistics Pro</h1>
-              <p className="text-xl text-blue-100">Dati Reali • Tutte le Partite • Analisi Intelligente</p>
-              <div className="mt-4 flex flex-wrap gap-3 text-sm">
-                <span className="bg-white bg-opacity-20 px-3 py-1 rounded-full">📊 Stagione Completa</span>
-                <span className="bg-white bg-opacity-20 px-3 py-1 rounded-full">🤖 AI Predictions</span>
-                <span className="bg-white bg-opacity-20 px-3 py-1 rounded-full">📈 Dati Storici H2H</span>
-                <span className="bg-white bg-opacity-20 px-3 py-1 rounded-full">🔄 Dual API System</span>
-                {lastUpdate && (
-                  <span className="bg-white bg-opacity-20 px-3 py-1 rounded-full">
-                    Aggiornato: {lastUpdate.toLocaleTimeString('it-IT')}
-                  </span>
-                )}
-              </div>
-            </div>
+          <div className="text-center">
+            <h1 className="text-4xl font-bold mb-2">⚽ Football Statistics Pro</h1>
+            <p className="text-xl text-blue-100">• Dati Reali • Analisi Intelligente</p>
           </div>
         </div>
       </div>
