@@ -565,7 +565,7 @@ const FootballStatsApp = () => {
                         </h4>
                         <div className="text-sm space-y-1">
                           <div className="flex justify-between">
-                            <span>Win Rate:</span>
+                            <span>% Vittorie:</span>
                             <strong className="text-green-600">{match.analysis.homeForm.wins / match.analysis.homeForm.matches}%</strong>
                           </div>
                           <div className="flex justify-between">
@@ -587,7 +587,7 @@ const FootballStatsApp = () => {
                         </h4>
                         <div className="text-sm space-y-1">
                           <div className="flex justify-between">
-                            <span>Win Rate:</span>
+                            <span>% Vittorie:</span>
                             <strong className="text-green-600">{match.analysis.awayForm.wins / match.analysis.awayForm.matches}%</strong>
                           </div>
                           <div className="flex justify-between">
