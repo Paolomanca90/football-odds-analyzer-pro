@@ -1,4 +1,4 @@
-// server-complete-final.js - Versione finale completa
+// server.js - Versione aggiornata con supporto primo tempo
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -23,9 +23,9 @@ const API_CONFIG = {
     }
 };
 
-// Rate limiting migliorato
+// Rate limiting
 let lastApiCall = 0;
-const MIN_INTERVAL = 6100; // 6.1 secondi per sicurezza
+const MIN_INTERVAL = 6100;
 
 async function rateLimitedCall(apiCall) {
     const now = Date.now();
@@ -42,12 +42,12 @@ async function rateLimitedCall(apiCall) {
 }
 
 // ===========================================
-// DATABASE SETUP
+// DATABASE SETUP CON SUPPORTO PRIMO TEMPO
 // ===========================================
 const db = new sqlite3.Database('./football_final.db');
 
 db.serialize(() => {
-    // Tabella partite storiche
+    // Tabella partite storiche AGGIORNATA con primo tempo
     db.run(`CREATE TABLE IF NOT EXISTS historical_matches (
         id INTEGER PRIMARY KEY,
         match_date TEXT NOT NULL,
@@ -64,9 +64,19 @@ db.serialize(() => {
         match_result TEXT,
         status TEXT DEFAULT 'FINISHED',
         winner TEXT,
+        -- NUOVE COLONNE PER PRIMO TEMPO
+        home_goals_ht INTEGER DEFAULT 0,
+        away_goals_ht INTEGER DEFAULT 0,
+        total_goals_ht INTEGER GENERATED ALWAYS AS (home_goals_ht + away_goals_ht),
+        match_result_ht TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(id) ON CONFLICT REPLACE
     )`);
+    
+    // Aggiungi colonne primo tempo se non esistono (per DB esistenti)
+    db.run(`ALTER TABLE historical_matches ADD COLUMN home_goals_ht INTEGER DEFAULT 0`, () => {});
+    db.run(`ALTER TABLE historical_matches ADD COLUMN away_goals_ht INTEGER DEFAULT 0`, () => {});
+    db.run(`ALTER TABLE historical_matches ADD COLUMN match_result_ht TEXT`, () => {});
     
     // Cache
     db.run(`CREATE TABLE IF NOT EXISTS cache_simple (
@@ -79,8 +89,9 @@ db.serialize(() => {
     db.run(`CREATE INDEX IF NOT EXISTS idx_h_teams ON historical_matches(home_team_id, away_team_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_h_date ON historical_matches(match_date DESC)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_h_season ON historical_matches(season, competition_id)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_h_ht_goals ON historical_matches(home_goals_ht, away_goals_ht)`);
     
-    console.log('📦 Database initialized');
+    console.log('📦 Database initialized with halftime support');
 });
 
 // Cache helper
@@ -104,190 +115,32 @@ const cache = {
 };
 
 // ===========================================
-// INIZIALIZZAZIONE AUTOMATICA
-// ===========================================
-class AutoInitializer {
-    
-    static async checkAndInitialize() {
-        console.log('Checking database initialization status...');
-        
-        // Controlla se abbiamo già dati storici
-        const hasData = await this.checkExistingData();
-        
-        if (hasData) {
-            console.log('Historical data already exists, skipping initialization');
-            return;
-        }
-        
-        console.log('No historical data found, starting automatic population...');
-        console.log('This will take approximately 15-20 minutes but only happens once');
-        
-        // Avvia popolazione di tutti i campionati
-        await this.populateAllLeagues();
-    }
-    
-    static async checkExistingData() {
-        return new Promise((resolve) => {
-            db.get(`
-                SELECT COUNT(*) as count 
-                FROM historical_matches 
-                WHERE season >= ?
-            `, [new Date().getFullYear() - 4], (err, row) => {
-                if (err) {
-                    console.log('Database check error:', err.message);
-                    resolve(false);
-                } else {
-                    const hasEnoughData = (row?.count || 0) > 1000; // Soglia minima
-                    console.log(`Found ${row?.count || 0} historical matches`);
-                    resolve(hasEnoughData);
-                }
-            });
-        });
-    }
-    
-    static async populateAllLeagues() {
-        const leagues = Object.keys(API_CONFIG.competitions);
-        const currentYear = new Date().getFullYear();
-        const startYear = currentYear - 4;
-        
-        console.log(`Populating ${leagues.length} leagues from ${startYear} to ${currentYear}`);
-        
-        for (const leagueId of leagues) {
-            try {
-                console.log(`\n=== Processing ${leagueId} ===`);
-                await this.populateLeague(leagueId, startYear, currentYear);
-                console.log(`✅ Completed ${leagueId}`);
-                
-                // Pausa tra campionati per non sovraccaricare l'API
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-            } catch (error) {
-                console.error(`❌ Failed to populate ${leagueId}:`, error.message);
-                // Continua con il prossimo campionato anche se questo fallisce
-            }
-        }
-        
-        console.log('\n🎯 Database initialization completed!');
-        console.log('Server is now ready with full historical data');
-    }
-    
-    static async populateLeague(leagueId, startYear, endYear) {
-        const competitionId = API_CONFIG.competitions[leagueId];
-        if (!competitionId) {
-            throw new Error(`Unknown league: ${leagueId}`);
-        }
-        
-        for (let season = startYear; season <= endYear; season++) {
-            try {
-                console.log(`  Fetching ${leagueId} season ${season}...`);
-                
-                const response = await rateLimitedCall(async () => {
-                    return await axios.get(
-                        `${API_CONFIG.baseUrl}/competitions/${competitionId}/matches`,
-                        {
-                            headers: API_CONFIG.headers,
-                            params: { 
-                                season,
-                                status: 'FINISHED' 
-                            },
-                            timeout: 20000
-                        }
-                    );
-                });
-                
-                const matches = response.data.matches || [];
-                console.log(`    Found ${matches.length} finished matches`);
-                
-                let saved = 0;
-                for (const match of matches) {
-                    if (await HistoricalManager.saveMatch(match, season, competitionId)) {
-                        saved++;
-                    }
-                }
-                
-                console.log(`    Saved ${saved} matches to database`);
-                
-            } catch (error) {
-                console.error(`    Error season ${season}:`, error.message);
-                
-                if (error.response?.status === 429) {
-                    console.log('    Rate limited, waiting 30 seconds...');
-                    await new Promise(resolve => setTimeout(resolve, 30000));
-                }
-                // Continua con la prossima stagione
-            }
-        }
-    }
-}
-
-// ===========================================
-// GESTIONE DATI STORICI (AGGIORNATA)
+// HISTORICAL MANAGER AGGIORNATO
 // ===========================================
 class HistoricalManager {
     
-    // Popola database con dati storici
-    static async populateHistorical(leagueId, years = 4) {
-        const competitionId = API_CONFIG.competitions[leagueId];
-        if (!competitionId) throw new Error(`Unknown league: ${leagueId}`);
-        
-        const currentYear = new Date().getFullYear();
-        const startYear = currentYear - years;
-        
-        console.log(`📚 Populating ${leagueId} from ${startYear} to ${currentYear}`);
-        
-        for (let season = startYear; season <= currentYear; season++) {
-            try {
-                console.log(`📅 Processing season ${season}...`);
-                
-                const response = await rateLimitedCall(async () => {
-                    return await axios.get(
-                        `${API_CONFIG.baseUrl}/competitions/${competitionId}/matches`,
-                        {
-                            headers: API_CONFIG.headers,
-                            params: { season, status: 'FINISHED' },
-                            timeout: 15000
-                        }
-                    );
-                });
-                
-                const matches = response.data.matches || [];
-                console.log(`  Found ${matches.length} finished matches`);
-                
-                let saved = 0;
-                for (const match of matches) {
-                    if (await this.saveMatch(match, season, competitionId)) {
-                        saved++;
-                    }
-                }
-                
-                console.log(`  Saved ${saved} matches to database`);
-                
-            } catch (error) {
-                console.error(`❌ Error season ${season}:`, error.message);
-                if (error.response?.status === 429) {
-                    console.log('  Rate limited, waiting extra time...');
-                    await new Promise(resolve => setTimeout(resolve, 30000));
-                }
-            }
-        }
-        
-        console.log(`✅ Historical data population completed`);
-    }
-    
-    // Salva singola partita
+    // FUNZIONE SAVEMATCH AGGIORNATA per salvare anche dati primo tempo
     static async saveMatch(match, season, competitionId) {
         if (!match.score?.fullTime || match.score.fullTime.home === null) {
             return false;
         }
         
+        // Estrai dati primo tempo (se disponibili)
+        const halfTimeScore = match.score?.halfTime || { home: 0, away: 0 };
+        const htHome = halfTimeScore.home !== null ? halfTimeScore.home : 0;
+        const htAway = halfTimeScore.away !== null ? halfTimeScore.away : 0;
+        
         return new Promise((resolve) => {
-            const result = this.getMatchResult(match.score.fullTime);
+            const ftResult = this.getMatchResult(match.score.fullTime);
+            const htResult = this.getMatchResult({ home: htHome, away: htAway });
             
             db.run(`
                 INSERT OR REPLACE INTO historical_matches 
-                (id, match_date, season, competition_id, matchday, home_team_id, away_team_id, 
-                 home_team_name, away_team_name, home_goals, away_goals, match_result, status, winner)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, match_date, season, competition_id, matchday, 
+                 home_team_id, away_team_id, home_team_name, away_team_name, 
+                 home_goals, away_goals, match_result, status, winner,
+                 home_goals_ht, away_goals_ht, match_result_ht)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 match.id,
                 match.utcDate,
@@ -300,9 +153,12 @@ class HistoricalManager {
                 match.awayTeam.name,
                 match.score.fullTime.home,
                 match.score.fullTime.away,
-                result,
+                ftResult,
                 match.status,
-                match.score.winner
+                match.score.winner,
+                htHome,
+                htAway,
+                htResult
             ], function(err) {
                 if (err) {
                     console.error('Save error:', err.message);
@@ -314,14 +170,19 @@ class HistoricalManager {
         });
     }
     
-    // Ottieni H2H dal database
-    static async getH2H(team1Id, team2Id, years = 5) {
+    // Ottieni H2H con dati primo tempo
+    static async getH2HWithHalftime(team1Id, team2Id, years = 5) {
         const cutoff = new Date();
         cutoff.setFullYear(cutoff.getFullYear() - years);
         
         return new Promise((resolve) => {
             db.all(`
-                SELECT * FROM historical_matches 
+                SELECT 
+                    *,
+                    (total_goals - COALESCE(total_goals_ht, 0)) as second_half_goals,
+                    (home_goals - COALESCE(home_goals_ht, 0)) as home_goals_2h,
+                    (away_goals - COALESCE(away_goals_ht, 0)) as away_goals_2h
+                FROM historical_matches 
                 WHERE ((home_team_id = ? AND away_team_id = ?) OR (home_team_id = ? AND away_team_id = ?))
                 AND match_date >= ?
                 ORDER BY match_date DESC
@@ -332,7 +193,11 @@ class HistoricalManager {
         });
     }
     
-    // Ottieni forma squadra (ultime 5 partite)
+    // Metodi esistenti...
+    static async getH2H(team1Id, team2Id, years = 5) {
+        return this.getH2HWithHalftime(team1Id, team2Id, years);
+    }
+    
     static async getTeamForm(teamId, competitionId, limit = 5) {
         return new Promise((resolve) => {
             db.all(`
@@ -347,7 +212,6 @@ class HistoricalManager {
         });
     }
     
-    // Statistiche squadra dal DB
     static async getTeamStats(teamId, competitionId, seasons = 2) {
         const currentYear = new Date().getFullYear();
         const startYear = currentYear - seasons;
@@ -363,12 +227,18 @@ class HistoricalManager {
                     SUM(CASE WHEN match_result = 'draw' THEN 1 ELSE 0 END) as draws,
                     AVG(CASE WHEN home_team_id = ? THEN home_goals ELSE away_goals END) as avg_goals_for,
                     AVG(CASE WHEN home_team_id = ? THEN away_goals ELSE home_goals END) as avg_goals_against,
-                    AVG(total_goals) as avg_total_goals
+                    AVG(total_goals) as avg_total_goals,
+                    
+                    -- Statistiche primo tempo
+                    AVG(CASE WHEN home_team_id = ? THEN COALESCE(home_goals_ht, 0) ELSE COALESCE(away_goals_ht, 0) END) as avg_goals_for_ht,
+                    AVG(COALESCE(total_goals_ht, 0)) as avg_total_goals_ht,
+                    SUM(CASE WHEN COALESCE(home_goals_ht, 0) > 0 AND COALESCE(away_goals_ht, 0) > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as btts_ht_pct
+                    
                 FROM historical_matches 
                 WHERE (home_team_id = ? OR away_team_id = ?) 
                 AND competition_id = ? 
                 AND season >= ?
-            `, [teamId, teamId, teamId, teamId, teamId, teamId, competitionId, startYear], (err, row) => {
+            `, [teamId, teamId, teamId, teamId, teamId, teamId, teamId, competitionId, startYear], (err, row) => {
                 resolve(err ? null : row);
             });
         });
@@ -382,21 +252,22 @@ class HistoricalManager {
 }
 
 // ===========================================
-// CALCOLI INTELLIGENTI
+// SMART CALCULATOR ESTESO
 // ===========================================
 class SmartCalculator {
     
     static async calculateProbabilities(homeId, awayId, competitionId) {
-        console.log(`🧮 Calculating for ${homeId} vs ${awayId}`);
+        console.log(`🧮 Calculating probabilities for ${homeId} vs ${awayId}`);
         
-        // 1. Prova H2H
-        const h2h = await HistoricalManager.getH2H(homeId, awayId);
+        // Ottieni H2H con dati primo tempo
+        const h2h = await HistoricalManager.getH2HWithHalftime(homeId, awayId);
+        
         if (h2h.length >= 3) {
-            console.log(`✅ Using H2H (${h2h.length} matches)`);
-            return this.fromH2H(h2h, homeId, awayId);
+            console.log(`✅ Using H2H with halftime (${h2h.length} matches)`);
+            return this.fromH2HExtended(h2h, homeId, awayId);
         }
         
-        // 2. Usa statistiche squadre
+        // Fallback con statistiche squadre
         console.log(`🔄 Using team stats fallback`);
         const [homeStats, awayStats] = await Promise.all([
             HistoricalManager.getTeamStats(homeId, competitionId),
@@ -407,91 +278,181 @@ class SmartCalculator {
             return this.fromTeamStats(homeStats, awayStats);
         }
         
-        // 3. Fallback generico
+        // Fallback generico
         console.log(`⚠️ Using generic fallback`);
         return this.getGenericProbabilities();
     }
     
-    // Calcolo da H2H reali
-    static fromH2H(matches, currentHomeId, currentAwayId) {
+    // Calcolo H2H ESTESO con primo tempo
+    static fromH2HExtended(matches, currentHomeId, currentAwayId) {
         const total = matches.length;
-        let homeWins = 0, awayWins = 0, draws = 0;
-        let totalGoals = 0, btts = 0, over25 = 0;
+        
+        // Contatori risultato finale
+        let ftHomeWins = 0, ftAwayWins = 0, ftDraws = 0;
+        let ftTotalGoals = 0, ftBtts = 0, ftOver25 = 0;
+        
+        // Contatori primo tempo  
+        let htHomeWins = 0, htAwayWins = 0, htDraws = 0;
+        let htTotalGoals = 0, htBtts = 0, htOver05 = 0, htOver15 = 0;
+        
+        // Contatori secondo tempo
+        let shTotalGoals = 0, shBtts = 0, shOver15 = 0;
         
         matches.forEach(match => {
-            totalGoals += match.total_goals;
-            if (match.home_goals > 0 && match.away_goals > 0) btts++;
-            if (match.total_goals > 2.5) over25++;
+            // Dati finale
+            ftTotalGoals += match.total_goals;
+            if (match.home_goals > 0 && match.away_goals > 0) ftBtts++;
+            if (match.total_goals > 2.5) ftOver25++;
             
+            // Dati primo tempo (usa 0 se null)
+            const htGoalsHome = match.home_goals_ht || 0;
+            const htGoalsAway = match.away_goals_ht || 0;
+            const htTotal = htGoalsHome + htGoalsAway;
+            
+            htTotalGoals += htTotal;
+            if (htGoalsHome > 0 && htGoalsAway > 0) htBtts++;
+            if (htTotal > 0.5) htOver05++;
+            if (htTotal > 1.5) htOver15++;
+            
+            // Dati secondo tempo
+            const shGoals = match.second_half_goals || (match.total_goals - htTotal);
+            const shHome = match.home_goals_2h || (match.home_goals - htGoalsHome);
+            const shAway = match.away_goals_2h || (match.away_goals - htGoalsAway);
+            
+            shTotalGoals += shGoals;
+            if (shHome > 0 && shAway > 0) shBtts++;
+            if (shGoals > 1.5) shOver15++;
+            
+            // Risultati finale
             if (match.match_result === 'draw') {
-                draws++;
+                ftDraws++;
             } else if (
                 (match.match_result === 'home' && match.home_team_id === currentHomeId) ||
                 (match.match_result === 'away' && match.away_team_id === currentHomeId)
             ) {
-                homeWins++;
+                ftHomeWins++;
             } else {
-                awayWins++;
+                ftAwayWins++;
+            }
+            
+            // Risultati primo tempo
+            const htResult = match.match_result_ht || this.getMatchResult({ home: htGoalsHome, away: htGoalsAway });
+            if (htResult === 'draw') {
+                htDraws++;
+            } else if (
+                (htResult === 'home' && match.home_team_id === currentHomeId) ||
+                (htResult === 'away' && match.away_team_id === currentHomeId)
+            ) {
+                htHomeWins++;
+            } else {
+                htAwayWins++;
             }
         });
         
-        const avgGoals = totalGoals / total;
+        // Calcola probabilità finale (con vantaggio casa)
+        let ftHomeProb = (ftHomeWins / total) * 1.15;
+        let ftDrawProb = ftDraws / total;
+        let ftAwayProb = ftAwayWins / total;
+        const ftSum = ftHomeProb + ftDrawProb + ftAwayProb;
         
-        // Aggiungi vantaggio casa del 15%
-        let homeProb = (homeWins / total) * 1.15;
-        let drawProb = draws / total;
-        let awayProb = awayWins / total;
-        
-        // Normalizza per sommare a 100%
-        const sum = homeProb + drawProb + awayProb;
+        // Calcola probabilità primo tempo (vantaggio casa minore)
+        let htHomeProb = (htHomeWins / total) * 1.08;
+        let htDrawProb = htDraws / total;
+        let htAwayProb = htAwayWins / total;
+        const htSum = htHomeProb + htDrawProb + htAwayProb;
         
         return {
-            '1X2': {
-                home: ((homeProb / sum) * 100).toFixed(1),
-                draw: ((drawProb / sum) * 100).toFixed(1),
-                away: ((awayProb / sum) * 100).toFixed(1)
+            // NUOVO FORMATO ESTESO
+            fullTime: {
+                '1X2': {
+                    home: ((ftHomeProb / ftSum) * 100).toFixed(1),
+                    draw: ((ftDrawProb / ftSum) * 100).toFixed(1),
+                    away: ((ftAwayProb / ftSum) * 100).toFixed(1)
+                },
+                goals: {
+                    expectedTotal: (ftTotalGoals / total).toFixed(2),
+                    over25: ((ftOver25 / total) * 100).toFixed(1),
+                    under25: (((total - ftOver25) / total) * 100).toFixed(1)
+                },
+                btts: {
+                    btts_yes: ((ftBtts / total) * 100).toFixed(1),
+                    btts_no: (((total - ftBtts) / total) * 100).toFixed(1)
+                }
             },
-            goals: {
-                expectedTotal: avgGoals.toFixed(2),
-                over25: ((over25 / total) * 100).toFixed(1),
-                under25: (((total - over25) / total) * 100).toFixed(1)
+            halfTime: {
+                '1X2': {
+                    home: ((htHomeProb / htSum) * 100).toFixed(1),
+                    draw: ((htDrawProb / htSum) * 100).toFixed(1),
+                    away: ((htAwayProb / htSum) * 100).toFixed(1)
+                },
+                goals: {
+                    expectedTotal: (htTotalGoals / total).toFixed(2),
+                    over05: ((htOver05 / total) * 100).toFixed(1),
+                    under05: (((total - htOver05) / total) * 100).toFixed(1),
+                    over15: ((htOver15 / total) * 100).toFixed(1),
+                    under15: (((total - htOver15) / total) * 100).toFixed(1)
+                },
+                btts: {
+                    btts_yes: ((htBtts / total) * 100).toFixed(1),
+                    btts_no: (((total - htBtts) / total) * 100).toFixed(1)
+                }
             },
-            btts: {
-                btts_yes: ((btts / total) * 100).toFixed(1),
-                btts_no: (((total - btts) / total) * 100).toFixed(1)
+            secondHalf: {
+                goals: {
+                    expectedTotal: (shTotalGoals / total).toFixed(2),
+                    over15: ((shOver15 / total) * 100).toFixed(1),
+                    under15: (((total - shOver15) / total) * 100).toFixed(1)
+                },
+                btts: {
+                    btts_yes: ((shBtts / total) * 100).toFixed(1),
+                    btts_no: (((total - shBtts) / total) * 100).toFixed(1)
+                }
             },
             h2hData: {
                 matches: matches.map(m => ({
                     date: m.match_date,
                     homeTeamName: m.home_team_name,
                     awayTeamName: m.away_team_name,
-                    homeGoals: m.home_goals,
-                    awayGoals: m.away_goals,
-                    totalGoals: m.total_goals,
-                    isBTTS: m.home_goals > 0 && m.away_goals > 0
+                    scoreHT: `${m.home_goals_ht || 0}-${m.away_goals_ht || 0}`,
+                    scoreFT: `${m.home_goals}-${m.away_goals}`,
+                    totalGoalsHT: m.total_goals_ht || 0,
+                    totalGoalsFT: m.total_goals,
+                    totalGoals2H: m.second_half_goals || (m.total_goals - (m.total_goals_ht || 0)),
+                    isBTTS_HT: (m.home_goals_ht || 0) > 0 && (m.away_goals_ht || 0) > 0,
+                    isBTTS_FT: m.home_goals > 0 && m.away_goals > 0,
+                    isBTTS_2H: (m.home_goals_2h || 0) > 0 && (m.away_goals_2h || 0) > 0
                 })).slice(0, 8),
                 summary: {
                     totalMatches: total,
-                    avgTotalGoals: avgGoals.toFixed(2),
-                    over25Percentage: ((over25 / total) * 100).toFixed(1),
-                    bttsPercentage: ((btts / total) * 100).toFixed(1),
-                    currentHomeTeamWins: homeWins,
-                    currentAwayTeamWins: awayWins,
-                    draws: draws
-                },
-                reliability: total >= 6 ? 'high' : 'medium'
+                    avgGoalsHT: (htTotalGoals / total).toFixed(2),
+                    over05HT_pct: ((htOver05 / total) * 100).toFixed(1),
+                    over15HT_pct: ((htOver15 / total) * 100).toFixed(1),
+                    bttsHT_pct: ((htBtts / total) * 100).toFixed(1),
+                    avgGoalsFT: (ftTotalGoals / total).toFixed(2),
+                    over25FT_pct: ((ftOver25 / total) * 100).toFixed(1),
+                    bttsFT_pct: ((ftBtts / total) * 100).toFixed(1),
+                    avgGoals2H: (shTotalGoals / total).toFixed(2),
+                    over15_2H_pct: ((shOver15 / total) * 100).toFixed(1),
+                    btts2H_pct: ((shBtts / total) * 100).toFixed(1),
+                    homeWinsFT: ftHomeWins,
+                    awayWinsFT: ftAwayWins,
+                    drawsFT: ftDraws,
+                    homeWinsHT: htHomeWins,
+                    awayWinsHT: htAwayWins,
+                    drawsHT: htDraws
+                }
             },
-            confidence: Math.min(85, 50 + (total * 4)),
-            dataSource: 'h2h_database'
+            confidence: Math.min(90, 55 + (total * 4)),
+            dataSource: 'h2h_extended_database'
         };
     }
     
-    // Calcolo da statistiche squadre
+    // Metodi esistenti (fromTeamStats, getGenericProbabilities)
     static fromTeamStats(homeStats, awayStats) {
         const homeWinRate = homeStats.wins / homeStats.total_matches;
         const awayWinRate = awayStats.wins / awayStats.total_matches;
         
-        let homeProb = homeWinRate * 1.2; // vantaggio casa
+        let homeProb = homeWinRate * 1.2;
         let awayProb = awayWinRate;
         let drawProb = 0.26;
         
@@ -523,7 +484,6 @@ class SmartCalculator {
         };
     }
     
-    // Probabilità generiche realistiche
     static getGenericProbabilities() {
         return {
             '1X2': {
@@ -545,112 +505,19 @@ class SmartCalculator {
             dataSource: 'generic_fallback'
         };
     }
-}
-
-// ===========================================
-// API PRINCIPALE
-// ===========================================
-class MainAPI {
     
-    // Ottieni partite intelligenti
-    static async getSmartMatches(leagueId, season = null) {
-        if (!season) season = new Date().getFullYear();
-        
-        const cacheKey = `matches_${leagueId}_${season}`;
-        const cached = await cache.get(cacheKey);
-        if (cached) return cached;
-
-        const competitionId = API_CONFIG.competitions[leagueId];
-        if (!competitionId) throw new Error(`Unknown league: ${leagueId}`);
-
-        try {
-            const response = await rateLimitedCall(async () => {
-                return await axios.get(
-                    `${API_CONFIG.baseUrl}/competitions/${competitionId}/matches`,
-                    {
-                        headers: API_CONFIG.headers,
-                        params: { season },
-                        timeout: 15000
-                    }
-                );
-            });
-
-            const allMatches = response.data.matches || [];
-            console.log(`📊 Retrieved ${allMatches.length} matches for ${leagueId} ${season}`);
-            
-            // Logica intelligente: ultime 15 finite + prossime 15
-            const now = new Date();
-            const finished = allMatches
-                .filter(m => m.status === 'FINISHED' && new Date(m.utcDate) <= now)
-                .sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate))
-                .slice(0, 15);
-                
-            const upcoming = allMatches
-                .filter(m => ['SCHEDULED', 'TIMED'].includes(m.status) && new Date(m.utcDate) > now)
-                .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate))
-                .slice(0, 15);
-            
-            const smartSelection = [...finished, ...upcoming];
-            console.log(`🎯 Smart selection: ${finished.length} finished + ${upcoming.length} upcoming`);
-            
-            await cache.set(cacheKey, smartSelection, 20);
-            return smartSelection;
-
-        } catch (error) {
-            console.error(`❌ Error fetching matches:`, error.message);
-            throw error;
-        }
-    }
-    
-    // Ottieni forma squadra
-    static async getTeamForm(teamId, competitionId) {
-        const matches = await HistoricalManager.getTeamForm(teamId, competitionId, 5);
-        
-        let wins = 0, draws = 0, losses = 0, goalsFor = 0, goalsAgainst = 0;
-        const form = [];
-        
-        matches.forEach(match => {
-            const isHome = match.home_team_id === teamId;
-            const ourGoals = isHome ? match.home_goals : match.away_goals;
-            const theirGoals = isHome ? match.away_goals : match.home_goals;
-            
-            goalsFor += ourGoals;
-            goalsAgainst += theirGoals;
-            
-            if (ourGoals > theirGoals) {
-                wins++;
-                form.push('W');
-            } else if (ourGoals < theirGoals) {
-                losses++;
-                form.push('L');
-            } else {
-                draws++;
-                form.push('D');
-            }
-        });
-        
-        return {
-            matches: matches.length,
-            wins, draws, losses,
-            goalsFor, goalsAgainst,
-            formString: form.join(''),
-            points: wins * 3 + draws,
-            avgGoalsFor: matches.length > 0 ? (goalsFor / matches.length).toFixed(1) : '0.0',
-            recentMatches: matches.slice(0, 3).map(m => ({
-                date: m.match_date.split('T')[0],
-                opponent: m.home_team_id === teamId ? m.away_team_name : m.home_team_name,
-                result: `${m.home_team_id === teamId ? m.home_goals : m.away_goals}-${m.home_team_id === teamId ? m.away_goals : m.home_goals}`,
-                wasHome: m.home_team_id === teamId
-            }))
-        };
+    static getMatchResult(score) {
+        if (score.home > score.away) return 'home';
+        if (score.away > score.home) return 'away';
+        return 'draw';
     }
 }
 
 // ===========================================
-// ENDPOINTS
+// API ENDPOINTS AGGIORNATI
 // ===========================================
 
-// Endpoint principale
+// Endpoint principale (invariato)
 app.get('/api/matches/:leagueId', async (req, res) => {
     const start = Date.now();
     
@@ -669,7 +536,6 @@ app.get('/api/matches/:leagueId', async (req, res) => {
         const competitionId = API_CONFIG.competitions[leagueId];
         const now = new Date();
 
-        // Processa partite con analisi
         const enriched = await Promise.all(
             matches.map(async (match) => {
                 const matchDate = new Date(match.utcDate);
@@ -728,7 +594,8 @@ app.get('/api/matches/:leagueId', async (req, res) => {
                 upcomingMatches: enriched.filter(m => m.isFuture).length,
                 withAnalysis: enriched.filter(m => m.analysis).length,
                 processingTime: `${time}ms`,
-                strategy: 'smart_recent_and_upcoming'
+                strategy: 'smart_recent_and_upcoming',
+                halftimeSupport: true // NUOVO FLAG
             }
         });
         
@@ -738,25 +605,286 @@ app.get('/api/matches/:leagueId', async (req, res) => {
     }
 });
 
-// Popola database
-app.post('/api/populate/:leagueId', async (req, res) => {
+// NUOVO ENDPOINT per analisi estesa
+app.get('/api/extended-analysis/:homeId/:awayId', async (req, res) => {
     try {
-        const { leagueId } = req.params;
-        const { years = 4 } = req.body;
+        const { homeId, awayId } = req.params;
+        const { league = 'SA' } = req.query;
+        const competitionId = API_CONFIG.competitions[league];
         
-        res.json({ success: true, message: 'Population started in background' });
+        const analysis = await SmartCalculator.calculateProbabilities(
+            parseInt(homeId), 
+            parseInt(awayId), 
+            competitionId
+        );
         
-        // Esegui in background
-        HistoricalManager.populateHistorical(leagueId, years)
-            .then(() => console.log(`✅ Population completed for ${leagueId}`))
-            .catch(err => console.error(`❌ Population failed for ${leagueId}:`, err));
+        res.json({
+            success: true,
+            homeTeamId: homeId,
+            awayTeamId: awayId,
+            league,
+            analysis,
+            breakdown: {
+                fullTime: 'Risultato finale (90 minuti)',
+                halfTime: 'Risultato primo tempo (45 minuti)', 
+                secondHalf: 'Solo secondo tempo (45-90 min)'
+            },
+            isExtendedAnalysis: !!(analysis.fullTime || analysis.halfTime)
+        });
         
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Test intelligente
+// Resto del codice invariato (MainAPI, endpoints, etc...)
+class MainAPI {
+    static async getSmartMatches(leagueId, season = null) {
+        if (!season) season = new Date().getFullYear();
+        
+        const cacheKey = `matches_${leagueId}_${season}`;
+        const cached = await cache.get(cacheKey);
+        if (cached) return cached;
+
+        const competitionId = API_CONFIG.competitions[leagueId];
+        if (!competitionId) throw new Error(`Unknown league: ${leagueId}`);
+
+        try {
+            const response = await rateLimitedCall(async () => {
+                return await axios.get(
+                    `${API_CONFIG.baseUrl}/competitions/${competitionId}/matches`,
+                    {
+                        headers: API_CONFIG.headers,
+                        params: { season },
+                        timeout: 15000
+                    }
+                );
+            });
+
+            const allMatches = response.data.matches || [];
+            console.log(`📊 Retrieved ${allMatches.length} matches for ${leagueId} ${season}`);
+            
+            const now = new Date();
+            const finished = allMatches
+                .filter(m => m.status === 'FINISHED' && new Date(m.utcDate) <= now)
+                .sort((a, b) => new Date(b.utcDate) - new Date(a.utcDate))
+                .slice(0, 15);
+                
+            const upcoming = allMatches
+                .filter(m => ['SCHEDULED', 'TIMED'].includes(m.status) && new Date(m.utcDate) > now)
+                .sort((a, b) => new Date(a.utcDate) - new Date(b.utcDate))
+                .slice(0, 15);
+            
+            const smartSelection = [...finished, ...upcoming];
+            console.log(`🎯 Smart selection: ${finished.length} finished + ${upcoming.length} upcoming`);
+            
+            await cache.set(cacheKey, smartSelection, 20);
+            return smartSelection;
+
+        } catch (error) {
+            console.error(`❌ Error fetching matches:`, error.message);
+            throw error;
+        }
+    }
+    
+    static async getTeamForm(teamId, competitionId) {
+        const matches = await HistoricalManager.getTeamForm(teamId, competitionId, 5);
+        
+        let wins = 0, draws = 0, losses = 0, goalsFor = 0, goalsAgainst = 0;
+        const form = [];
+        
+        matches.forEach(match => {
+            const isHome = match.home_team_id === teamId;
+            const ourGoals = isHome ? match.home_goals : match.away_goals;
+            const theirGoals = isHome ? match.away_goals : match.home_goals;
+            
+            goalsFor += ourGoals;
+            goalsAgainst += theirGoals;
+            
+            if (ourGoals > theirGoals) {
+                wins++;
+                form.push('W');
+            } else if (ourGoals < theirGoals) {
+                losses++;
+                form.push('L');
+            } else {
+                draws++;
+                form.push('D');
+            }
+        });
+        
+        return {
+            matches: matches.length,
+            wins, draws, losses,
+            goalsFor, goalsAgainst,
+            formString: form.join(''),
+            points: wins * 3 + draws,
+            avgGoalsFor: matches.length > 0 ? (goalsFor / matches.length).toFixed(1) : '0.0',
+            recentMatches: matches.slice(0, 3).map(m => ({
+                date: m.match_date.split('T')[0],
+                opponent: m.home_team_id === teamId ? m.away_team_name : m.home_team_name,
+                result: `${m.home_team_id === teamId ? m.home_goals : m.away_goals}-${m.home_team_id === teamId ? m.away_goals : m.home_goals}`,
+                wasHome: m.home_team_id === teamId
+            }))
+        };
+    }
+}
+
+// ===========================================
+// INIZIALIZZAZIONE AUTOMATICA AGGIORNATA
+// ===========================================
+class AutoInitializer {
+    
+    static async checkAndInitialize() {
+        console.log('🔍 Checking database initialization status...');
+        
+        const hasData = await this.checkExistingData();
+        
+        if (hasData) {
+            console.log('✅ Historical data already exists');
+            // Controlla se abbiamo dati primo tempo
+            await this.checkHalftimeData();
+            return;
+        }
+        
+        console.log('📥 No historical data found, starting automatic population...');
+        console.log('⏱️  This will take approximately 15-20 minutes but only happens once');
+        
+        await this.populateAllLeagues();
+    }
+    
+    static async checkExistingData() {
+        return new Promise((resolve) => {
+            db.get(`
+                SELECT COUNT(*) as count 
+                FROM historical_matches 
+                WHERE season >= ?
+            `, [new Date().getFullYear() - 4], (err, row) => {
+                if (err) {
+                    console.log('Database check error:', err.message);
+                    resolve(false);
+                } else {
+                    const hasEnoughData = (row?.count || 0) > 1000;
+                    console.log(`📊 Found ${row?.count || 0} historical matches`);
+                    resolve(hasEnoughData);
+                }
+            });
+        });
+    }
+    
+    static async checkHalftimeData() {
+        return new Promise((resolve) => {
+            db.get(`
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(home_goals_ht) as with_ht,
+                    ROUND(AVG(COALESCE(total_goals_ht, 0)), 2) as avg_ht_goals
+                FROM historical_matches 
+                WHERE season >= ?
+            `, [new Date().getFullYear() - 2], (err, row) => {
+                if (err) {
+                    console.log('HT check error:', err.message);
+                    resolve();
+                    return;
+                }
+                
+                const total = row?.total || 0;
+                const withHT = row?.with_ht || 0;
+                const coverage = total > 0 ? ((withHT / total) * 100).toFixed(1) : '0.0';
+                
+                console.log(`📊 Halftime Data Status:`);
+                console.log(`   Total matches: ${total}`);
+                console.log(`   With HT data: ${withHT}`);
+                console.log(`   Coverage: ${coverage}%`);
+                console.log(`   Avg HT goals: ${row?.avg_ht_goals || '0.00'}`);
+                
+                if (withHT < total * 0.8) {
+                    console.log('⚠️  Low halftime data coverage, but this is normal');
+                    console.log('   New matches will automatically include HT data');
+                }
+                
+                resolve();
+            });
+        });
+    }
+    
+    static async populateAllLeagues() {
+        const leagues = Object.keys(API_CONFIG.competitions);
+        const currentYear = new Date().getFullYear();
+        const startYear = currentYear - 4;
+        
+        console.log(`🏆 Populating ${leagues.length} leagues from ${startYear} to ${currentYear}`);
+        
+        for (const leagueId of leagues) {
+            try {
+                console.log(`\n=== Processing ${leagueId} ===`);
+                await this.populateLeague(leagueId, startYear, currentYear);
+                console.log(`✅ Completed ${leagueId}`);
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+            } catch (error) {
+                console.error(`❌ Failed to populate ${leagueId}:`, error.message);
+            }
+        }
+        
+        console.log('\n🎉 Database initialization completed with halftime support!');
+        console.log('📊 Server is now ready with full historical data including first half statistics');
+    }
+    
+    static async populateLeague(leagueId, startYear, endYear) {
+        const competitionId = API_CONFIG.competitions[leagueId];
+        if (!competitionId) {
+            throw new Error(`Unknown league: ${leagueId}`);
+        }
+        
+        for (let season = startYear; season <= endYear; season++) {
+            try {
+                console.log(`  📅 Fetching ${leagueId} season ${season}...`);
+                
+                const response = await rateLimitedCall(async () => {
+                    return await axios.get(
+                        `${API_CONFIG.baseUrl}/competitions/${competitionId}/matches`,
+                        {
+                            headers: API_CONFIG.headers,
+                            params: { 
+                                season,
+                                status: 'FINISHED' 
+                            },
+                            timeout: 20000
+                        }
+                    );
+                });
+                
+                const matches = response.data.matches || [];
+                console.log(`    📋 Found ${matches.length} finished matches`);
+                
+                let saved = 0;
+                for (const match of matches) {
+                    if (await HistoricalManager.saveMatch(match, season, competitionId)) {
+                        saved++;
+                    }
+                }
+                
+                console.log(`    💾 Saved ${saved} matches with HT data to database`);
+                
+            } catch (error) {
+                console.error(`    ❌ Error season ${season}:`, error.message);
+                
+                if (error.response?.status === 429) {
+                    console.log('    ⏳ Rate limited, waiting 30 seconds...');
+                    await new Promise(resolve => setTimeout(resolve, 30000));
+                }
+            }
+        }
+    }
+}
+
+// ===========================================
+// ALTRI ENDPOINTS
+// ===========================================
+
+// Test intelligente aggiornato
 app.get('/api/test/:homeId/:awayId', async (req, res) => {
     try {
         const { homeId, awayId } = req.params;
@@ -767,7 +895,7 @@ app.get('/api/test/:homeId/:awayId', async (req, res) => {
             SmartCalculator.calculateProbabilities(parseInt(homeId), parseInt(awayId), competitionId),
             MainAPI.getTeamForm(parseInt(homeId), competitionId),
             MainAPI.getTeamForm(parseInt(awayId), competitionId),
-            HistoricalManager.getH2H(parseInt(homeId), parseInt(awayId))
+            HistoricalManager.getH2HWithHalftime(parseInt(homeId), parseInt(awayId))
         ]);
         
         res.json({
@@ -790,7 +918,8 @@ app.get('/api/test/:homeId/:awayId', async (req, res) => {
             h2hSummary: {
                 totalMatches: h2h.length,
                 dataSource: probabilities.dataSource,
-                confidence: probabilities.confidence
+                confidence: probabilities.confidence,
+                hasHalftimeData: h2h.some(m => m.home_goals_ht !== null)
             }
         });
         
@@ -799,7 +928,7 @@ app.get('/api/test/:homeId/:awayId', async (req, res) => {
     }
 });
 
-// Health check
+// Health check aggiornato
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK',
@@ -808,66 +937,35 @@ app.get('/api/health', (req, res) => {
             'Smart H2H Calculations', 
             'Team Form Analysis',
             'Intelligent Fallbacks',
-            'Smart Match Selection'
+            'Smart Match Selection',
+            '🆕 First Half Statistics (45 min)', // NUOVO
+            '🆕 Second Half Analysis (45-90 min)', // NUOVO
+            '🆕 Multi-Period Probabilities' // NUOVO
         ],
         apis: {
             footballData: process.env.FOOTBALL_DATA_API_KEY ? 'Configured' : 'Missing'
-        }
+        },
+        halftimeSupport: true // NUOVO FLAG
     });
 });
 
-// Endpoint per monitorare progresso inizializzazione
-app.get('/api/init-status', (req, res) => {
-    db.all(`
-        SELECT 
-            competition_id,
-            season,
-            COUNT(*) as matches
-        FROM historical_matches 
-        GROUP BY competition_id, season
-        ORDER BY competition_id, season DESC
-    `, (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-        } else {
-            // Raggruppa per competizione
-            const byCompetition = {};
-            const competitionNames = {
-                2019: 'Serie A', 2021: 'Premier League', 2002: 'Bundesliga',
-                2015: 'Ligue 1', 2014: 'La Liga', 2003: 'Eredivisie',
-                2017: 'Primeira Liga', 2001: 'Champions League'
-            };
-            
-            rows.forEach(row => {
-                const name = competitionNames[row.competition_id] || `Competition ${row.competition_id}`;
-                if (!byCompetition[name]) {
-                    byCompetition[name] = [];
-                }
-                byCompetition[name].push({
-                    season: row.season,
-                    matches: row.matches
-                });
-            });
-            
-            db.get('SELECT COUNT(*) as total FROM historical_matches', (err, total) => {
-                res.json({
-                    success: true,
-                    totalMatches: total?.total || 0,
-                    competitionBreakdown: byCompetition,
-                    isInitialized: (total?.total || 0) > 1000,
-                    lastUpdated: new Date().toISOString()
-                });
-            });
-        }
-    });
-});
-
-// Database stats
+// Statistiche database aggiornate
 app.get('/api/db-stats', (req, res) => {
     const queries = [
         'SELECT COUNT(*) as total FROM historical_matches',
         'SELECT COUNT(DISTINCT home_team_id) as teams FROM historical_matches',
-        'SELECT season, COUNT(*) as matches FROM historical_matches GROUP BY season ORDER BY season DESC LIMIT 5'
+        'SELECT season, COUNT(*) as matches FROM historical_matches GROUP BY season ORDER BY season DESC LIMIT 5',
+        // NUOVE QUERY per statistiche primo tempo
+        `SELECT 
+            COUNT(*) as total_matches,
+            COUNT(home_goals_ht) as with_halftime_data,
+            ROUND(AVG(COALESCE(total_goals_ht, 0)), 2) as avg_ht_goals,
+            ROUND(AVG(total_goals), 2) as avg_ft_goals,
+            ROUND(
+                COUNT(CASE WHEN COALESCE(home_goals_ht, 0) > 0 AND COALESCE(away_goals_ht, 0) > 0 THEN 1 END) * 100.0 / 
+                COUNT(CASE WHEN home_goals_ht IS NOT NULL THEN 1 END), 1
+            ) as btts_ht_percentage
+        FROM historical_matches`
     ];
     
     Promise.all(queries.map(q => 
@@ -878,14 +976,27 @@ app.get('/api/db-stats', (req, res) => {
                 db.get(q, (err, row) => resolve(row || {}));
             }
         })
-    )).then(([total, teams, seasons]) => {
+    )).then(([total, teams, seasons, halftimeStats]) => {
         res.json({
             success: true,
             database: {
                 totalMatches: total.total || 0,
                 totalTeams: teams.teams || 0,
-                seasonBreakdown: seasons
-            }
+                seasonBreakdown: seasons,
+                // NUOVE STATISTICHE primo tempo
+                halftimeData: {
+                    totalMatches: halftimeStats.total_matches || 0,
+                    withHalftimeData: halftimeStats.with_halftime_data || 0,
+                    coverage: halftimeStats.total_matches > 0 ? 
+                        `${((halftimeStats.with_halftime_data / halftimeStats.total_matches) * 100).toFixed(1)}%` : '0%',
+                    avgHalftimeGoals: halftimeStats.avg_ht_goals || '0.00',
+                    avgFulltimeGoals: halftimeStats.avg_ft_goals || '0.00',
+                    bttsHalftimePercentage: halftimeStats.btts_ht_percentage || '0.0',
+                    goalRatio: halftimeStats.avg_ft_goals > 0 ? 
+                        (halftimeStats.avg_ht_goals / halftimeStats.avg_ft_goals).toFixed(2) : '0.00'
+                }
+            },
+            halftimeSupport: true
         });
     });
 });
@@ -907,7 +1018,7 @@ function getTimeInfo(match) {
 // Cleanup
 setInterval(() => {
     db.run(`DELETE FROM cache_simple WHERE expires_at < datetime('now')`);
-}, 3600000); // ogni ora
+}, 3600000);
 
 // Start server
 app.listen(PORT, () => {
@@ -918,20 +1029,25 @@ app.listen(PORT, () => {
     console.log('  - Team form analysis (last 5 matches)');
     console.log('  - Smart fallback calculations');
     console.log('  - Optimized match selection strategy');
+    console.log('  🆕 - First half statistics (45 min analysis)');
+    console.log('  🆕 - Second half analysis (45-90 min)');
+    console.log('  🆕 - Multi-period probability calculations');
     console.log('🌐 Endpoints:');
-    console.log('  - GET /api/db-stats (database statistics)');
-    console.log('  - GET /api/health (system health)');
+    console.log('  - GET /api/matches/:leagueId (enhanced with HT support)');
+    console.log('  - GET /api/extended-analysis/:homeId/:awayId (NEW - multi-period analysis)');
+    console.log('  - GET /api/db-stats (enhanced with HT statistics)');
+    console.log('  - GET /api/health (updated features list)');
     console.log('');
-    console.log('First run: POST /api/populate/SA to build historical database');
-    console.log('This will take ~20 minutes but only needs to be done once');
+    console.log('🎯 All new matches will automatically include first half data');
+    console.log('📈 Enhanced H2H analysis with multi-period statistics');
 });
 
-// Avvia l'inizializzazione automatica al primo avvio
+// Avvia l'inizializzazione automatica aggiornata
 setTimeout(() => {
     AutoInitializer.checkAndInitialize()
-        .then(() => console.log('✅ Auto-initialization check completed'))
+        .then(() => console.log('✅ Auto-initialization check completed with halftime support'))
         .catch(err => console.error('❌ Auto-initialization failed:', err));
-}, 3000); // Ritardo di 3 secondi per permettere al server di avviarsi
+}, 3000);
 
 process.on('SIGINT', () => {
     console.log('Shutting down server...');

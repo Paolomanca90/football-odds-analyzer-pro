@@ -468,9 +468,54 @@ const FootballStatsApp = () => {
   // ===========================================
 
   function AnalysisModal({ match, onClose }) {
-    console.log('🔍 Opening analysis modal for match:', match);
+    const [activeTab, setActiveTab] = useState('fullTime');
+    const [analysis, setAnalysis] = useState(null);
+    const [loading, setLoading] = useState(true);
+    
+    console.log('🔍 Opening extended analysis modal for match:', match);
 
-    if (!match.analysis?.probabilities) {
+    // Carica analisi estesa
+    useEffect(() => {
+      const fetchExtendedAnalysis = async () => {
+        try {
+          setLoading(true);
+          console.log('🔄 Loading extended analysis...');
+          
+          const response = await api.get(`/extended-analysis/${match.homeTeam.id}/${match.awayTeam.id}`, {
+            params: { league: selectedLeague }
+          });
+          
+          if (response.data.success) {
+            setAnalysis(response.data.analysis);
+            console.log('✅ Extended analysis loaded:', response.data.analysis);
+          }
+        } catch (error) {
+          console.error('❌ Error loading extended analysis:', error);
+          // Fallback alla vecchia analisi se l'estesa fallisce
+          setAnalysis(match.analysis?.probabilities || null);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchExtendedAnalysis();
+    }, [match]);
+
+    if (loading) {
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl p-8 max-w-2xl w-full text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-600 mx-auto mb-4"></div>
+            <h3 className="text-xl font-bold mb-2">Analisi Multi-Tempo in Corso...</h3>
+            <p className="text-gray-600">
+              Caricamento statistiche 1° tempo, 2° tempo e finali
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!analysis) {
       return (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50" onClick={onClose}>
           <div className="bg-white rounded-3xl p-8 max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
@@ -478,8 +523,8 @@ const FootballStatsApp = () => {
               <div className="text-6xl mb-4">⚠️</div>
               <h3 className="text-2xl font-bold mb-4">Analisi Non Disponibile</h3>
               <p className="text-gray-600 mb-6">
-                Le probabilità non sono disponibili per questa partita. 
-                Potrebbero essere partite già terminate o in corso.
+                L'analisi multi-tempo non è disponibile per questa partita. 
+                Potrebbero essere partite già terminate o senza dati storici sufficienti.
               </p>
               <button
                 onClick={onClose}
@@ -493,13 +538,16 @@ const FootballStatsApp = () => {
       );
     }
 
+    // Controlla se abbiamo analisi estesa o standard
+    const isExtendedAnalysis = analysis.fullTime || analysis.halfTime;
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50" onClick={onClose}>
         <div className="bg-white rounded-3xl p-8 max-w-7xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <div className="flex justify-between items-center mb-8">
             <h2 className="text-3xl font-bold flex items-center">
               <span className="text-4xl mr-4">📊</span>
-              Analisi Completa: {match.homeTeam?.name} vs {match.awayTeam?.name}
+              {isExtendedAnalysis ? 'Analisi Multi-Tempo' : 'Analisi Completa'}: {match.homeTeam?.name} vs {match.awayTeam?.name}
             </h2>
             <button
               onClick={onClose}
@@ -510,88 +558,120 @@ const FootballStatsApp = () => {
           </div>
 
           <div>
-            {/* Probabilità Complete */}
-            <div className="grid gap-8">
-              <h3 className="text-2xl font-bold mb-6 flex items-center">
-                <span className="text-3xl mr-3">🎯</span>
-                Probabilità Reali da Dati Storici
-              </h3>
-              
-              <ProbabilitiesDisplay 
-                probabilities={match.analysis.probabilities}
-                homeTeam={match.homeTeam?.name}
-                awayTeam={match.awayTeam?.name}
-              />
+            {isExtendedAnalysis ? (
+              <div>
+                {/* Tab per i diversi tempi */}
+                <TimePeriodsTab activeTab={activeTab} setActiveTab={setActiveTab} />
 
-              {/* H2H DETTAGLIATO QUI */}
-              {match.analysis.probabilities.h2hData && match.analysis.probabilities.h2hData.matches && match.analysis.probabilities.h2hData.matches.length > 0 && (
-                <div className="mt-8">
-                  <HeadToHeadDisplay 
-                    h2hData={match.analysis.probabilities.h2hData}
-                    homeTeam={match.homeTeam?.name}
-                    awayTeam={match.awayTeam?.name}
-                  />
-                </div>
-              )}
+                {/* Display delle probabilità per il tempo selezionato */}
+                <ExtendedProbabilitiesDisplay 
+                  analysis={analysis}
+                  homeTeam={match.homeTeam?.name}
+                  awayTeam={match.awayTeam?.name}
+                  activeTab={activeTab}
+                />
 
-              {/* Sidebar con Info Aggiuntive */}
-              <div className="mt-8">
-                {/* Team Stats Summary - MIGLIORATO */}
-                <div className="bg-white p-6 rounded-xl border shadow-sm">
-                  <h3 className="text-xl font-bold mb-5">📈 Statistiche Squadre - Ultimi incontri:</h3>                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6"> 
-                    {match.analysis.homeForm && (
-                      <div className="mb-4 p-4 bg-blue-50 rounded-lg">
-                        <h4 className="font-bold text-blue-600 mb-2 flex items-center justify-between">
-                          🏠 {match.homeTeam.name} (Casa)
-                        </h4>
-                        <div className="text-sm space-y-1">
-                          <div className="flex justify-between">
-                            <span>% Vittorie:</span>
-                            <strong className="text-green-600">{match.analysis.homeForm.wins / match.analysis.homeForm.matches}%</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Media Gol:</span>
-                            <strong className="text-blue-600">{match.analysis.homeForm.avgGoalsFor}/partita</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Risultati:</span>
-                            <strong>{match.analysis.homeForm.wins}V-{match.analysis.homeForm.draws}P-{match.analysis.homeForm.losses}S</strong>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {match.analysis.awayForm && (
-                      <div className="mb-4 p-4 bg-red-50 rounded-lg">
-                        <h4 className="font-bold text-red-600 mb-2 flex items-center justify-between">
-                          ✈️ {match.awayTeam.name} (Trasferta)
-                        </h4>
-                        <div className="text-sm space-y-1">
-                          <div className="flex justify-between">
-                            <span>% Vittorie:</span>
-                            <strong className="text-green-600">{match.analysis.awayForm.wins / match.analysis.awayForm.matches}%</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Media Gol:</span>
-                            <strong className="text-blue-600">{match.analysis.awayForm.avgGoalsFor}/partita</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Risultati:</span>
-                            <strong>{match.analysis.awayForm.wins}V-{match.analysis.awayForm.draws}P-{match.analysis.awayForm.losses}S</strong>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {match.analysis.confidence && (
-                      <div className="p-3 bg-green-50 rounded flex flex-col items-center justify-center">
-                        <div className="text-2xl font-bold text-green-600">{match.analysis.confidence}%</div>
-                        <div className="text-sm text-green-700">Precisione Analisi</div>
-                      </div>
-                    )}
+                {/* H2H esteso (sempre visibile) */}
+                {analysis.h2hData && (
+                  <div className="mt-8">
+                    <ExtendedHeadToHeadDisplay 
+                      h2hData={analysis.h2hData}
+                      homeTeam={match.homeTeam?.name}
+                      awayTeam={match.awayTeam?.name}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                {/* Analisi standard (fallback per compatibilità) */}
+                <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 mb-6">
+                  <div className="flex items-center">
+                    <span className="text-2xl mr-3">ℹ️</span>
+                    <div>
+                      <h4 className="font-bold text-yellow-800">Analisi Standard</h4>
+                      <p className="text-yellow-700 text-sm">
+                        Analisi basata su dati completi di fine partita. 
+                        L'analisi multi-tempo sarà disponibile con più dati storici.
+                      </p>
+                    </div>
                   </div>
                 </div>
+
+                <ProbabilitiesDisplay 
+                  probabilities={analysis}
+                  homeTeam={match.homeTeam?.name}
+                  awayTeam={match.awayTeam?.name}
+                />
+
+                {analysis.h2hData && (
+                  <div className="mt-8">
+                    <HeadToHeadDisplay 
+                      h2hData={analysis.h2hData}
+                      homeTeam={match.homeTeam?.name}
+                      awayTeam={match.awayTeam?.name}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Sidebar con Info Aggiuntive */}
+          <div className="mt-8">
+            {/* Team Stats Summary - MIGLIORATO */}
+            <div className="bg-white p-6 rounded-xl border shadow-sm">
+              <h3 className="text-xl font-bold mb-5">📈 Statistiche Squadre - Ultimi incontri:</h3>                  
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6"> 
+                {match.analysis.homeForm && (
+                  <div className="mb-4 p-4 bg-blue-50 rounded-lg">
+                    <h4 className="font-bold text-blue-600 mb-2 flex items-center justify-between">
+                      🏠 {match.homeTeam.name} (Casa)
+                    </h4>
+                    <div className="text-sm space-y-1">
+                      <div className="flex justify-between">
+                        <span>% Vittorie:</span>
+                        <strong className="text-green-600">{match.analysis.homeForm.wins / match.analysis.homeForm.matches}%</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Media Gol:</span>
+                        <strong className="text-blue-600">{match.analysis.homeForm.avgGoalsFor}/partita</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Risultati:</span>
+                        <strong>{match.analysis.homeForm.wins}V-{match.analysis.homeForm.draws}P-{match.analysis.homeForm.losses}S</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {match.analysis.awayForm && (
+                  <div className="mb-4 p-4 bg-red-50 rounded-lg">
+                    <h4 className="font-bold text-red-600 mb-2 flex items-center justify-between">
+                      ✈️ {match.awayTeam.name} (Trasferta)
+                    </h4>
+                    <div className="text-sm space-y-1">
+                      <div className="flex justify-between">
+                        <span>% Vittorie:</span>
+                        <strong className="text-green-600">{match.analysis.awayForm.wins / match.analysis.awayForm.matches}%</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Media Gol:</span>
+                        <strong className="text-blue-600">{match.analysis.awayForm.avgGoalsFor}/partita</strong>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Risultati:</span>
+                        <strong>{match.analysis.awayForm.wins}V-{match.analysis.awayForm.draws}P-{match.analysis.awayForm.losses}S</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {match.analysis.confidence && (
+                  <div className="p-3 bg-green-50 rounded flex flex-col items-center justify-center">
+                    <div className="text-2xl font-bold text-green-600">{match.analysis.confidence}%</div>
+                    <div className="text-sm text-green-700">Precisione Analisi</div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -821,3 +901,451 @@ const FootballStatsApp = () => {
 };
 
 export default FootballStatsApp;
+
+  // Componente Tab per i diversi tempi
+  const TimePeriodsTab = ({ activeTab, setActiveTab }) => {
+    const tabs = [
+      { id: 'fullTime', label: '90\' Finale', icon: '⚽', desc: 'Risultato completo' },
+      { id: 'halfTime', label: '45\' Primo Tempo', icon: '🕐', desc: 'Solo 1° tempo' },
+      { id: 'secondHalf', label: '45\' Secondo Tempo', icon: '🕕', desc: 'Solo 2° tempo' }
+    ];
+
+    return (
+      <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl p-2 mb-8 border border-blue-200">
+        <div className="grid grid-cols-3 gap-2">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex flex-col items-center justify-center space-y-2 py-4 px-6 rounded-lg font-semibold transition-all transform hover:scale-105 border-0 focus:outline-none ${
+                activeTab === tab.id
+                  ? 'bg-white text-blue-600 shadow-lg scale-105'
+                  : 'text-gray-600 hover:text-gray-800 hover:bg-white/50'
+              }`}
+            >
+              <span className="text-2xl">{tab.icon}</span>
+              <div className="text-center">
+                <div className="text-sm font-bold">{tab.label}</div>
+                <div className="text-xs opacity-75">{tab.desc}</div>
+              </div>
+              {activeTab === tab.id && (
+                <div className="w-full h-1 bg-blue-600 rounded-full"></div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Componente per display probabilità estese
+  const ExtendedProbabilitiesDisplay = ({ analysis, homeTeam, awayTeam, activeTab }) => {
+    console.log('🔍 Displaying extended probabilities for tab:', activeTab, analysis);
+    if (!analysis) return <div>Analisi non disponibile</div>;
+
+    const currentData = analysis[activeTab];
+    if (!currentData) return <div>Dati non disponibili per questo periodo</div>;
+
+    // Titoli dinamici basati sul tab
+    const titles = {
+      fullTime: { 
+        period: 'Risultato Finale (90\')', 
+        goalThreshold: '2.5 Under/Over Totali',
+        description: 'Probabilità per l\'intero match'
+      },
+      halfTime: { 
+        period: 'Primo Tempo (45\')', 
+        goalThreshold: '0.5/1.5 Under/Over (1° Tempo)',
+        description: 'Statistiche solo per i primi 45 minuti'
+      },
+      secondHalf: { 
+        period: 'Secondo Tempo (45\')', 
+        goalThreshold: '1.5 Under/Over (2° Tempo)',
+        description: 'Statistiche solo per i minuti 45-90'
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        {/* Header descrittivo */}
+        <div className="text-center bg-gray-50 p-4 rounded-xl">
+          <h3 className="text-lg font-bold text-gray-800">{titles[activeTab].period}</h3>
+          <p className="text-sm text-gray-600">{titles[activeTab].description}</p>
+        </div>
+
+        {/* Risultato 1X2 */}
+        <div className="bg-white p-6 rounded-xl border shadow-sm">
+          <h3 className="text-xl font-bold mb-4">
+            🎯 Probabilità {titles[activeTab].period}
+          </h3>
+          
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-blue-50 p-4 rounded-lg text-center border-2 border-blue-200 hover:shadow-md transition-shadow">
+              <div className="text-3xl font-bold text-blue-600">{currentData['1X2']?.home}%</div>
+              <div className="text-sm font-medium">Vittoria {homeTeam}</div>
+              {activeTab === 'halfTime' && <div className="text-xs text-gray-500 mt-1">in vantaggio al 45'</div>}
+            </div>
+            <div className="bg-yellow-50 p-4 rounded-lg text-center border-2 border-yellow-200 hover:shadow-md transition-shadow">
+              <div className="text-3xl font-bold text-yellow-600">{currentData['1X2']?.draw}%</div>
+              <div className="text-sm font-medium">Pareggio</div>
+              {activeTab === 'halfTime' && <div className="text-xs text-gray-500 mt-1">pari al 45'</div>}
+            </div>
+            <div className="bg-red-50 p-4 rounded-lg text-center border-2 border-red-200 hover:shadow-md transition-shadow">
+              <div className="text-3xl font-bold text-red-600">{currentData['1X2']?.away}%</div>
+              <div className="text-sm font-medium">Vittoria {awayTeam}</div>
+              {activeTab === 'halfTime' && <div className="text-xs text-gray-500 mt-1">in vantaggio al 45'</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Goals Over/Under - Dinamico per tempo */}
+        <GoalsSection currentData={currentData} activeTab={activeTab} titles={titles} />
+
+        {/* BTTS - Dinamico per tempo */}
+        <BTTSSection currentData={currentData} activeTab={activeTab} />
+      </div>
+    );
+  };
+
+  // Componente Goals separato per gestire meglio la logica
+  const GoalsSection = ({ currentData, activeTab, titles }) => {
+    const labels = {
+      fullTime: { over: 'Over 2.5 Gol', under: 'Under 2.5 Gol' },
+      halfTime: { over: 'Over 1.5 Gol', under: 'Under 1.5 Gol' },
+      secondHalf: { over: 'Over 1.5 Gol', under: 'Under 1.5 Gol' }
+    };
+
+    return (
+      <div className="bg-white p-6 rounded-xl border shadow-sm">
+        <h3 className="text-xl font-bold mb-4">⚽ {titles[activeTab].goalThreshold}</h3>
+        
+        <div className="text-center mb-4">
+          <div className="text-4xl font-bold text-green-600">
+            {currentData.goals?.expectedTotal || '0.00'}
+          </div>
+          <div className="text-sm text-gray-600">
+            Gol Attesi {activeTab === 'fullTime' ? '(90 min)' : activeTab === 'halfTime' ? '(45 min)' : '(45-90 min)'}
+          </div>
+        </div>
+        
+        {/* Over/Under specifici per ogni tempo */}
+        {activeTab === 'fullTime' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className={`p-4 rounded-lg text-center border-2 hover:shadow-md transition-all ${
+            parseFloat(currentData.btts?.btts_yes || '50') > 50 ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'
+          }`}>
+            <div className={`text-3xl font-bold ${
+              parseFloat(currentData.btts?.btts_yes || '50') > 50 ? 'text-green-600' : 'text-blue-600'
+            }`}>
+              {currentData.btts?.btts_yes}%
+            </div>
+            <div className="text-sm font-medium">
+              {labels[activeTab].yes}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Entrambe le squadre segnano
+            </div>
+          </div>
+          <div className={`p-4 rounded-lg text-center border-2 hover:shadow-md transition-all ${
+            parseFloat(currentData.btts?.btts_no || '50') > 50 ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
+          }`}>
+            <div className={`text-3xl font-bold ${
+              parseFloat(currentData.btts?.btts_no || '50') > 50 ? 'text-blue-600' : 'text-green-600'
+            }`}>
+              {currentData.btts?.btts_no}%
+            </div>
+            <div className="text-sm font-medium">
+              {labels[activeTab].no}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Almeno una squadra non segna
+            </div>
+          </div>
+        </div>
+        )}
+      </div>
+    );
+  };
+
+  // H2H esteso con tutti i tempi
+  const ExtendedHeadToHeadDisplay = ({ h2hData, homeTeam, awayTeam }) => {
+    if (!h2hData || !h2hData.matches || h2hData.matches.length === 0) {
+      return (
+        <div className="bg-white p-6 rounded-xl border shadow-sm text-center">
+          <h3 className="text-xl font-bold mb-4">📊 Scontri Diretti Multi-Tempo</h3>
+          <div className="text-center py-8">
+            <div className="text-4xl mb-3">🤷‍♂️</div>
+            <p className="text-gray-500">Nessun dato head-to-head disponibile</p>
+          </div>
+        </div>
+      );
+    }
+
+    const { matches, summary } = h2hData;
+
+    return (
+      <div className="bg-white p-6 rounded-xl border shadow-sm">
+        <h3 className="text-xl font-bold mb-4 text-center">
+          📊 Scontri Diretti Multi-Tempo ({matches.length} partite)
+        </h3>
+        
+        {/* STATISTICHE AGGREGATE MULTI-TEMPO */}
+        {summary && (
+          <div className="bg-gradient-to-r from-blue-50 via-purple-50 to-green-50 p-6 rounded-xl border-2 border-blue-200 mb-6">
+            <h4 className="font-bold text-lg mb-4 text-center text-blue-800">
+              📈 Statistiche Aggregate Multi-Tempo
+            </h4>
+            
+            {/* Grid delle statistiche per tempo */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              {/* Primo Tempo */}
+              <div className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500">
+                <h5 className="font-bold text-center text-blue-600 mb-3 flex items-center justify-center">
+                  <span className="text-xl mr-2">🕐</span>
+                  1° Tempo (45')
+                </h5>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Media Gol:</span>
+                    <strong className="text-blue-600">{summary.avgGoalsHT}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Over 0.5:</span>
+                    <strong className="text-green-600">{summary.over05HT_pct}%</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Over 1.5:</span>
+                    <strong className="text-purple-600">{summary.over15HT_pct}%</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Goal 1T:</span>
+                    <strong className="text-orange-600">{summary.bttsHT_pct}%</strong>
+                  </div>
+                  <hr className="my-2" />
+                  <div className="text-xs text-center space-y-1">
+                    <div className="font-semibold text-blue-700">Risultati 1T:</div>
+                    <div><strong>{homeTeam}:</strong> {summary.homeWinsHT}V</div>
+                    <div><strong>Pareggi:</strong> {summary.drawsHT}</div>
+                    <div><strong>{awayTeam}:</strong> {summary.awayWinsHT}V</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Secondo Tempo */}
+              <div className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-green-500">
+                <h5 className="font-bold text-center text-green-600 mb-3 flex items-center justify-center">
+                  <span className="text-xl mr-2">🕕</span>
+                  2° Tempo (45')
+                </h5>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Media Gol:</span>
+                    <strong className="text-green-600">{summary.avgGoals2H}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Over 1.5:</span>
+                    <strong className="text-purple-600">{summary.over15_2H_pct}%</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Goal 2T:</span>
+                    <strong className="text-orange-600">{summary.btts2H_pct}%</strong>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-2 p-2 bg-gray-50 rounded">
+                    <strong>Nota:</strong> Statistiche calcolate solo sui gol segnati dal 45° al 90° minuto
+                  </div>
+                </div>
+              </div>
+
+              {/* Finale */}
+              <div className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-red-500">
+                <h5 className="font-bold text-center text-red-600 mb-3 flex items-center justify-center">
+                  <span className="text-xl mr-2">⚽</span>
+                  Finale (90')
+                </h5>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Media Gol:</span>
+                    <strong className="text-red-600">{summary.avgGoalsFT}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Over 2.5:</span>
+                    <strong className="text-green-600">{summary.over25FT_pct}%</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Goal FT:</span>
+                    <strong className="text-orange-600">{summary.bttsFT_pct}%</strong>
+                  </div>
+                  <hr className="my-2" />
+                  <div className="text-xs text-center space-y-1">
+                    <div className="font-semibold text-red-700">Risultati Finali:</div>
+                    <div><strong>{homeTeam}:</strong> {summary.homeWinsFT}V</div>
+                    <div><strong>Pareggi:</strong> {summary.drawsFT}</div>
+                    <div><strong>{awayTeam}:</strong> {summary.awayWinsFT}V</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CRONOLOGIA DETTAGLIATA CON TUTTI I TEMPI */}
+        <div className="mt-6">
+          <h5 className="font-bold mb-3 flex items-center">
+            <span className="text-lg mr-2">📋</span>
+            Cronologia Completa con Parziali:
+          </h5>
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            {matches.slice(0, 10).map((match, index) => (
+              <div key={index} className="bg-gradient-to-r from-gray-50 to-blue-50 p-4 rounded-lg border hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-center">
+                  {/* Data */}
+                  <div className="text-xs text-gray-600 w-20">
+                    {new Date(match.date).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                  </div>
+                  
+                  {/* Squadre e risultati */}
+                  <div className="flex-1 text-center">
+                    <div className="text-xs mb-2 text-gray-600 font-medium">
+                      {match.homeTeamName} vs {match.awayTeamName}
+                    </div>
+                    <div className="flex justify-center items-center space-x-6">
+                      {/* Primo tempo */}
+                      <div className="text-center">
+                        <div className="text-sm font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded">
+                          {match.scoreHT}
+                        </div>
+                        <div className="text-xs text-blue-500 mt-1">1° Tempo</div>
+                      </div>
+                      
+                      {/* Finale */}
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-black bg-white px-3 py-1 rounded border-2 border-gray-300">
+                          {match.scoreFT}
+                        </div>
+                        <div className="text-xs text-gray-600 mt-1">Finale</div>
+                      </div>
+                      
+                      {/* Secondo tempo (calcolato) */}
+                      <div className="text-center">
+                        <div className="text-sm font-bold text-green-600 bg-green-100 px-2 py-1 rounded">
+                          {match.totalGoals2H}g
+                        </div>
+                        <div className="text-xs text-green-500 mt-1">2° Tempo</div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Badge statistiche */}
+                  <div className="text-center w-32">
+                    {/* Badge Primo Tempo */}
+                    <div className="text-xs space-x-1 mb-2">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${
+                        match.totalGoalsHT > 0.5 ? 'bg-blue-200 text-blue-800' : 'bg-gray-200 text-gray-600'
+                      }`}>
+                        {match.totalGoalsHT > 0.5 ? 'O0.5-1T' : 'U0.5-1T'}
+                      </span>
+                      {match.totalGoalsHT > 1.5 && (
+                        <span className="bg-purple-200 text-purple-800 px-2 py-1 rounded text-xs font-bold">O1.5-1T</span>
+                      )}
+                      {match.isBTTS_HT && (
+                        <span className="bg-indigo-200 text-indigo-800 px-2 py-1 rounded text-xs font-bold">GG-1T</span>
+                      )}
+                    </div>
+                    
+                    {/* Badge Finale */}
+                    <div className="text-xs space-x-1 mb-2">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${
+                        match.totalGoalsFT > 2.5 ? 'bg-green-200 text-green-800' : 'bg-orange-200 text-orange-800'
+                      }`}>
+                        {match.totalGoalsFT > 2.5 ? 'O2.5' : 'U2.5'}
+                      </span>
+                      {match.isBTTS_FT && (
+                        <span className="bg-red-200 text-red-800 px-2 py-1 rounded text-xs font-bold">GG-FT</span>
+                      )}
+                    </div>
+                    
+                    {/* Badge Secondo Tempo */}
+                    <div className="text-xs space-x-1">
+                      {match.totalGoals2H > 1.5 && (
+                        <span className="bg-yellow-200 text-yellow-800 px-2 py-1 rounded text-xs font-bold">O1.5-2T</span>
+                      )}
+                      {match.isBTTS_2H && (
+                        <span className="bg-pink-200 text-pink-800 px-2 py-1 rounded text-xs font-bold">GG-2T</span>
+                      )}
+                    </div>
+                    
+                    {/* Riepilogo gol per tempo */}
+                    <div className="text-xs text-gray-400 mt-2 bg-gray-100 px-2 py-1 rounded">
+                      1T: {match.totalGoalsHT}g • 2T: {match.totalGoals2H}g
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {matches.length > 10 && (
+            <div className="text-center mt-3">
+              <div className="text-xs text-gray-500 bg-gray-100 px-3 py-2 rounded-lg inline-block">
+                📊 Mostrate le ultime 10 partite su {matches.length} totali
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Componente BTTS corretto - da inserire nel tuo App.jsx
+  const BTTSSection = ({ currentData, activeTab }) => {
+    // Definizione delle labels per ogni periodo
+    const labels = {
+      fulltime: { yes: 'Goal (90 min)', no: 'NoGoal (90 min)' },
+      halftime: { yes: 'Goal 1T', no: 'NoGoal 1T' },
+      secondhalf: { yes: 'Goal 2T', no: 'NoGoal 2T' }
+    };
+
+    // Fallback per currentData
+    const bttsData = currentData?.btts || { btts_yes: '50', btts_no: '50' };
+
+    return (
+      <div className="bg-white p-6 rounded-xl border shadow-sm">
+        <h3 className="text-xl font-bold mb-4">
+          🥅 Goal/NoGoal {activeTab === 'fullTime' ? 'Totali' : activeTab === 'halfTime' ? '(1° Tempo)' : '(2° Tempo)'}
+        </h3>
+        
+        <div className="grid grid-cols-2 gap-4">
+          <div className={`p-4 rounded-lg text-center border-2 hover:shadow-md transition-all ${
+            parseFloat(bttsData.btts_yes || '50') > 50 ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'
+          }`}>
+            <div className={`text-3xl font-bold ${
+              parseFloat(bttsData.btts_yes || '50') > 50 ? 'text-green-600' : 'text-blue-600'
+            }`}>
+              {bttsData.btts_yes}%
+            </div>
+            <div className="text-sm font-medium">
+              {labels[activeTab]?.yes || 'Goal'}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Entrambe le squadre segnano
+            </div>
+          </div>
+          <div className={`p-4 rounded-lg text-center border-2 hover:shadow-md transition-all ${
+            parseFloat(bttsData.btts_no || '50') > 50 ? 'bg-blue-50 border-blue-200' : 'bg-green-50 border-green-200'
+          }`}>
+            <div className={`text-3xl font-bold ${
+              parseFloat(bttsData.btts_no || '50') > 50 ? 'text-blue-600' : 'text-green-600'
+            }`}>
+              {bttsData.btts_no}%
+            </div>
+            <div className="text-sm font-medium">
+              {labels[activeTab]?.no || 'NoGoal'}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Almeno una squadra non segna
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
