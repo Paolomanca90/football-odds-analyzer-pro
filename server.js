@@ -254,75 +254,103 @@ class HistoricalManager {
 // ===========================================
 // SMART CALCULATOR ESTESO
 // ===========================================
+// SmartCalculator AGGIORNATO - Versione completa con tutti gli Over/Under
 class SmartCalculator {
     
     static async calculateProbabilities(homeId, awayId, competitionId) {
-        console.log(`🧮 Calculating probabilities for ${homeId} vs ${awayId}`);
+        console.log(`🧮 Calculating enhanced probabilities for ${homeId} vs ${awayId}`);
         
         // Ottieni H2H con dati primo tempo
         const h2h = await HistoricalManager.getH2HWithHalftime(homeId, awayId);
         
         if (h2h.length >= 3) {
-            console.log(`✅ Using H2H with halftime (${h2h.length} matches)`);
-            return this.fromH2HExtended(h2h, homeId, awayId);
+            console.log(`✅ Using H2H enhanced analysis (${h2h.length} matches)`);
+            return this.fromH2HEnhanced(h2h, homeId, awayId);
         }
         
-        // Fallback con statistiche squadre
-        console.log(`🔄 Using team stats fallback`);
-        const [homeStats, awayStats] = await Promise.all([
+        // Fallback con statistiche squadre (MIGLIORATO)
+        console.log(`🔄 Using enhanced team stats fallback`);
+        const [homeStats, awayStats, homeForm, awayForm] = await Promise.all([
             HistoricalManager.getTeamStats(homeId, competitionId),
-            HistoricalManager.getTeamStats(awayId, competitionId)
+            HistoricalManager.getTeamStats(awayId, competitionId),
+            HistoricalManager.getTeamForm(homeId, competitionId, 5),
+            HistoricalManager.getTeamForm(awayId, competitionId, 5)
         ]);
         
-        if (homeStats?.total_matches >= 15 && awayStats?.total_matches >= 15) {
-            return this.fromTeamStats(homeStats, awayStats);
+        if (homeForm?.length >= 3 && awayForm?.length >= 3) {
+            console.log(`📊 Using recent form analysis (${homeForm.length} + ${awayForm.length} matches)`);
+            return this.fromRecentForm(homeForm, awayForm, homeId, awayId);
         }
         
         // Fallback generico
-        console.log(`⚠️ Using generic fallback`);
-        return this.getGenericProbabilities();
+        console.log(`⚠️ Using enhanced generic fallback`);
+        return this.getEnhancedGenericProbabilities();
     }
     
-    // Calcolo H2H ESTESO con primo tempo
-    static fromH2HExtended(matches, currentHomeId, currentAwayId) {
+    // NUOVO: Calcolo H2H completo con tutte le soglie Over/Under
+    static fromH2HEnhanced(matches, currentHomeId, currentAwayId) {
         const total = matches.length;
         
         // Contatori risultato finale
         let ftHomeWins = 0, ftAwayWins = 0, ftDraws = 0;
-        let ftTotalGoals = 0, ftBtts = 0, ftOver25 = 0;
+        let ftTotalGoals = 0, ftBtts = 0;
         
         // Contatori primo tempo  
         let htHomeWins = 0, htAwayWins = 0, htDraws = 0;
-        let htTotalGoals = 0, htBtts = 0, htOver05 = 0, htOver15 = 0;
+        let htTotalGoals = 0, htBtts = 0;
         
-        // Contatori secondo tempo
-        let shTotalGoals = 0, shBtts = 0, shOver15 = 0;
+        // NUOVO: Contatori secondo tempo (anche per risultati!)
+        let shHomeWins = 0, shAwayWins = 0, shDraws = 0; // <-- AGGIUNTO
+        let shTotalGoals = 0, shBtts = 0;
+        
+        // Contatori per tutte le soglie Over/Under
+        const overCounters = {
+            ft: { over05: 0, over15: 0, over25: 0, over35: 0 },
+            ht: { over05: 0, over15: 0, over25: 0, over35: 0 },
+            sh: { over05: 0, over15: 0, over25: 0, over35: 0 }
+        };
         
         matches.forEach(match => {
-            // Dati finale
-            ftTotalGoals += match.total_goals;
+            // === DATI FINALE ===
+            const ftGoals = match.total_goals;
+            ftTotalGoals += ftGoals;
             if (match.home_goals > 0 && match.away_goals > 0) ftBtts++;
-            if (match.total_goals > 2.5) ftOver25++;
             
-            // Dati primo tempo (usa 0 se null)
+            // Over/Under finale
+            if (ftGoals > 0.5) overCounters.ft.over05++;
+            if (ftGoals > 1.5) overCounters.ft.over15++;
+            if (ftGoals > 2.5) overCounters.ft.over25++;
+            if (ftGoals > 3.5) overCounters.ft.over35++;
+            
+            // === DATI PRIMO TEMPO ===
             const htGoalsHome = match.home_goals_ht || 0;
             const htGoalsAway = match.away_goals_ht || 0;
-            const htTotal = htGoalsHome + htGoalsAway;
+            const htGoals = htGoalsHome + htGoalsAway;
             
-            htTotalGoals += htTotal;
+            htTotalGoals += htGoals;
             if (htGoalsHome > 0 && htGoalsAway > 0) htBtts++;
-            if (htTotal > 0.5) htOver05++;
-            if (htTotal > 1.5) htOver15++;
             
-            // Dati secondo tempo
-            const shGoals = match.second_half_goals || (match.total_goals - htTotal);
-            const shHome = match.home_goals_2h || (match.home_goals - htGoalsHome);
-            const shAway = match.away_goals_2h || (match.away_goals - htGoalsAway);
+            // Over/Under primo tempo
+            if (htGoals > 0.5) overCounters.ht.over05++;
+            if (htGoals > 1.5) overCounters.ht.over15++;
+            if (htGoals > 2.5) overCounters.ht.over25++;
+            if (htGoals > 3.5) overCounters.ht.over35++;
+            
+            // === DATI SECONDO TEMPO ===
+            const shGoalsHome = Math.max(0, match.home_goals - htGoalsHome);
+            const shGoalsAway = Math.max(0, match.away_goals - htGoalsAway);
+            const shGoals = shGoalsHome + shGoalsAway;
             
             shTotalGoals += shGoals;
-            if (shHome > 0 && shAway > 0) shBtts++;
-            if (shGoals > 1.5) shOver15++;
+            if (shGoalsHome > 0 && shGoalsAway > 0) shBtts++;
             
+            // Over/Under secondo tempo
+            if (shGoals > 0.5) overCounters.sh.over05++;
+            if (shGoals > 1.5) overCounters.sh.over15++;
+            if (shGoals > 2.5) overCounters.sh.over25++;
+            if (shGoals > 3.5) overCounters.sh.over35++;
+            
+            // === RISULTATI ===
             // Risultati finale
             if (match.match_result === 'draw') {
                 ftDraws++;
@@ -336,7 +364,7 @@ class SmartCalculator {
             }
             
             // Risultati primo tempo
-            const htResult = match.match_result_ht || this.getMatchResult({ home: htGoalsHome, away: htGoalsAway });
+            const htResult = this.getMatchResult({ home: htGoalsHome, away: htGoalsAway });
             if (htResult === 'draw') {
                 htDraws++;
             } else if (
@@ -347,22 +375,40 @@ class SmartCalculator {
             } else {
                 htAwayWins++;
             }
+            
+            // NUOVO: Risultati secondo tempo 
+            const shResult = this.getMatchResult({ home: shGoalsHome, away: shGoalsAway });
+            if (shResult === 'draw') {
+                shDraws++;
+            } else if (
+                (shResult === 'home' && match.home_team_id === currentHomeId) ||
+                (shResult === 'away' && match.away_team_id === currentHomeId)
+            ) {
+                shHomeWins++;
+            } else {
+                shAwayWins++;
+            }
         });
         
-        // Calcola probabilità finale (con vantaggio casa)
+        // Calcola probabilità con vantaggio casa
         let ftHomeProb = (ftHomeWins / total) * 1.15;
         let ftDrawProb = ftDraws / total;
         let ftAwayProb = ftAwayWins / total;
         const ftSum = ftHomeProb + ftDrawProb + ftAwayProb;
         
-        // Calcola probabilità primo tempo (vantaggio casa minore)
         let htHomeProb = (htHomeWins / total) * 1.08;
         let htDrawProb = htDraws / total;
         let htAwayProb = htAwayWins / total;
         const htSum = htHomeProb + htDrawProb + htAwayProb;
         
+        // NUOVO: Calcola probabilità secondo tempo (vantaggio casa minimo)
+        let shHomeProb = (shHomeWins / total) * 1.05; // Vantaggio casa minimo nel 2T
+        let shDrawProb = shDraws / total;
+        let shAwayProb = shAwayWins / total;
+        const shSum = shHomeProb + shDrawProb + shAwayProb;
+        
         return {
-            // NUOVO FORMATO ESTESO
+            // FORMATO COMPLETO CON TUTTE LE SOGLIE
             fullTime: {
                 '1X2': {
                     home: ((ftHomeProb / ftSum) * 100).toFixed(1),
@@ -371,8 +417,14 @@ class SmartCalculator {
                 },
                 goals: {
                     expectedTotal: (ftTotalGoals / total).toFixed(2),
-                    over25: ((ftOver25 / total) * 100).toFixed(1),
-                    under25: (((total - ftOver25) / total) * 100).toFixed(1)
+                    over05: ((overCounters.ft.over05 / total) * 100).toFixed(1),
+                    under05: (((total - overCounters.ft.over05) / total) * 100).toFixed(1),
+                    over15: ((overCounters.ft.over15 / total) * 100).toFixed(1),
+                    under15: (((total - overCounters.ft.over15) / total) * 100).toFixed(1),
+                    over25: ((overCounters.ft.over25 / total) * 100).toFixed(1),
+                    under25: (((total - overCounters.ft.over25) / total) * 100).toFixed(1),
+                    over35: ((overCounters.ft.over35 / total) * 100).toFixed(1),
+                    under35: (((total - overCounters.ft.over35) / total) * 100).toFixed(1)
                 },
                 btts: {
                     btts_yes: ((ftBtts / total) * 100).toFixed(1),
@@ -387,21 +439,37 @@ class SmartCalculator {
                 },
                 goals: {
                     expectedTotal: (htTotalGoals / total).toFixed(2),
-                    over05: ((htOver05 / total) * 100).toFixed(1),
-                    under05: (((total - htOver05) / total) * 100).toFixed(1),
-                    over15: ((htOver15 / total) * 100).toFixed(1),
-                    under15: (((total - htOver15) / total) * 100).toFixed(1)
+                    over05: ((overCounters.ht.over05 / total) * 100).toFixed(1),
+                    under05: (((total - overCounters.ht.over05) / total) * 100).toFixed(1),
+                    over15: ((overCounters.ht.over15 / total) * 100).toFixed(1),
+                    under15: (((total - overCounters.ht.over15) / total) * 100).toFixed(1),
+                    over25: ((overCounters.ht.over25 / total) * 100).toFixed(1),
+                    under25: (((total - overCounters.ht.over25) / total) * 100).toFixed(1),
+                    over35: ((overCounters.ht.over35 / total) * 100).toFixed(1),
+                    under35: (((total - overCounters.ht.over35) / total) * 100).toFixed(1)
                 },
                 btts: {
                     btts_yes: ((htBtts / total) * 100).toFixed(1),
                     btts_no: (((total - htBtts) / total) * 100).toFixed(1)
                 }
             },
+            // NUOVO: Aggiunto 1X2 per secondo tempo
             secondHalf: {
+                '1X2': {
+                    home: ((shHomeProb / shSum) * 100).toFixed(1),
+                    draw: ((shDrawProb / shSum) * 100).toFixed(1),
+                    away: ((shAwayProb / shSum) * 100).toFixed(1)
+                },
                 goals: {
                     expectedTotal: (shTotalGoals / total).toFixed(2),
-                    over15: ((shOver15 / total) * 100).toFixed(1),
-                    under15: (((total - shOver15) / total) * 100).toFixed(1)
+                    over05: ((overCounters.sh.over05 / total) * 100).toFixed(1),
+                    under05: (((total - overCounters.sh.over05) / total) * 100).toFixed(1),
+                    over15: ((overCounters.sh.over15 / total) * 100).toFixed(1),
+                    under15: (((total - overCounters.sh.over15) / total) * 100).toFixed(1),
+                    over25: ((overCounters.sh.over25 / total) * 100).toFixed(1),
+                    under25: (((total - overCounters.sh.over25) / total) * 100).toFixed(1),
+                    over35: ((overCounters.sh.over35 / total) * 100).toFixed(1),
+                    under35: (((total - overCounters.sh.over35) / total) * 100).toFixed(1)
                 },
                 btts: {
                     btts_yes: ((shBtts / total) * 100).toFixed(1),
@@ -417,92 +485,276 @@ class SmartCalculator {
                     scoreFT: `${m.home_goals}-${m.away_goals}`,
                     totalGoalsHT: m.total_goals_ht || 0,
                     totalGoalsFT: m.total_goals,
-                    totalGoals2H: m.second_half_goals || (m.total_goals - (m.total_goals_ht || 0)),
+                    totalGoals2H: Math.max(0, m.total_goals - (m.total_goals_ht || 0)),
                     isBTTS_HT: (m.home_goals_ht || 0) > 0 && (m.away_goals_ht || 0) > 0,
                     isBTTS_FT: m.home_goals > 0 && m.away_goals > 0,
-                    isBTTS_2H: (m.home_goals_2h || 0) > 0 && (m.away_goals_2h || 0) > 0
+                    isBTTS_2H: (m.home_goals - (m.home_goals_ht || 0)) > 0 && (m.away_goals - (m.away_goals_ht || 0)) > 0
                 })).slice(0, 8),
                 summary: {
                     totalMatches: total,
                     avgGoalsHT: (htTotalGoals / total).toFixed(2),
-                    over05HT_pct: ((htOver05 / total) * 100).toFixed(1),
-                    over15HT_pct: ((htOver15 / total) * 100).toFixed(1),
-                    bttsHT_pct: ((htBtts / total) * 100).toFixed(1),
                     avgGoalsFT: (ftTotalGoals / total).toFixed(2),
-                    over25FT_pct: ((ftOver25 / total) * 100).toFixed(1),
-                    bttsFT_pct: ((ftBtts / total) * 100).toFixed(1),
                     avgGoals2H: (shTotalGoals / total).toFixed(2),
-                    over15_2H_pct: ((shOver15 / total) * 100).toFixed(1),
+                    // Aggiungi tutte le percentuali
+                    over05HT_pct: ((overCounters.ht.over05 / total) * 100).toFixed(1),
+                    over15HT_pct: ((overCounters.ht.over15 / total) * 100).toFixed(1),
+                    over25HT_pct: ((overCounters.ht.over25 / total) * 100).toFixed(1),
+                    over35HT_pct: ((overCounters.ht.over35 / total) * 100).toFixed(1),
+                    over05FT_pct: ((overCounters.ft.over05 / total) * 100).toFixed(1),
+                    over15FT_pct: ((overCounters.ft.over15 / total) * 100).toFixed(1),
+                    over25FT_pct: ((overCounters.ft.over25 / total) * 100).toFixed(1),
+                    over35FT_pct: ((overCounters.ft.over35 / total) * 100).toFixed(1),
+                    over052H_pct: ((overCounters.sh.over05 / total) * 100).toFixed(1),
+                    over152H_pct: ((overCounters.sh.over15 / total) * 100).toFixed(1),
+                    over252H_pct: ((overCounters.sh.over25 / total) * 100).toFixed(1),
+                    over352H_pct: ((overCounters.sh.over35 / total) * 100).toFixed(1),
+                    bttsHT_pct: ((htBtts / total) * 100).toFixed(1),
+                    bttsFT_pct: ((ftBtts / total) * 100).toFixed(1),
                     btts2H_pct: ((shBtts / total) * 100).toFixed(1),
                     homeWinsFT: ftHomeWins,
                     awayWinsFT: ftAwayWins,
                     drawsFT: ftDraws,
                     homeWinsHT: htHomeWins,
                     awayWinsHT: htAwayWins,
-                    drawsHT: htDraws
+                    drawsHT: htDraws,
+                    // NUOVO: Aggiungi risultati secondo tempo
+                    homeWins2H: shHomeWins,
+                    awayWins2H: shAwayWins,
+                    draws2H: shDraws
                 }
             },
             confidence: Math.min(90, 55 + (total * 4)),
-            dataSource: 'h2h_extended_database'
+            dataSource: 'h2h_enhanced_database'
         };
     }
     
-    // Metodi esistenti (fromTeamStats, getGenericProbabilities)
-    static fromTeamStats(homeStats, awayStats) {
-        const homeWinRate = homeStats.wins / homeStats.total_matches;
-        const awayWinRate = awayStats.wins / awayStats.total_matches;
+    // NUOVO: Fallback basato su forma recente (ultimi 5 match di ogni squadra)
+    static fromRecentForm(homeMatches, awayMatches, currentHomeId, currentAwayId) {
+        console.log(`📊 Analyzing recent form: Home(${homeMatches.length}) vs Away(${awayMatches.length})`);
         
-        let homeProb = homeWinRate * 1.2;
-        let awayProb = awayWinRate;
-        let drawProb = 0.26;
+        // Analizza forma casa
+        const homeAnalysis = this.analyzeTeamMatches(homeMatches, currentHomeId, true);
+        const awayAnalysis = this.analyzeTeamMatches(awayMatches, currentAwayId, false);
         
-        const sum = homeProb + awayProb + drawProb;
+        // Combina le analisi per prevedere il match
+        const expectedHomeGoals = homeAnalysis.avgGoalsFor * 1.1; // Vantaggio casa
+        const expectedAwayGoals = awayAnalysis.avgGoalsFor * 0.95;
+        const expectedTotal = expectedHomeGoals + expectedAwayGoals;
         
-        const expectedGoals = parseFloat(homeStats.avg_goals_for) + parseFloat(awayStats.avg_goals_for);
-        const over25Prob = expectedGoals > 2.5 ? 
-            Math.min(75, 45 + (expectedGoals - 2.5) * 15) : 
-            Math.max(25, 45 - (2.5 - expectedGoals) * 10);
+        // Calcola probabilità risultato
+        const homeWinProb = Math.max(0.15, homeAnalysis.winRate * 1.2);
+        const awayWinProb = Math.max(0.15, awayAnalysis.winRate * 0.9);
+        const drawProb = Math.max(0.2, 0.35 - (homeWinProb + awayWinProb) * 0.5);
+        
+        const total1X2 = homeWinProb + drawProb + awayWinProb;
         
         return {
-            '1X2': {
-                home: ((homeProb / sum) * 100).toFixed(1),
-                draw: ((drawProb / sum) * 100).toFixed(1),
-                away: ((awayProb / sum) * 100).toFixed(1)
+            fullTime: {
+                '1X2': {
+                    home: ((homeWinProb / total1X2) * 100).toFixed(1),
+                    draw: ((drawProb / total1X2) * 100).toFixed(1),
+                    away: ((awayWinProb / total1X2) * 100).toFixed(1)
+                },
+                goals: this.calculateOverUnderFromExpected(expectedTotal, 'fullTime'),
+                btts: {
+                    btts_yes: this.calculateBTTSProbability(homeAnalysis, awayAnalysis).toFixed(1),
+                    btts_no: (100 - this.calculateBTTSProbability(homeAnalysis, awayAnalysis)).toFixed(1)
+                }
             },
-            goals: {
-                expectedTotal: expectedGoals.toFixed(2),
-                over25: over25Prob.toFixed(1),
-                under25: (100 - over25Prob).toFixed(1)
+            halfTime: {
+                '1X2': {
+                    home: (((homeWinProb * 0.7) / (homeWinProb * 0.7 + drawProb * 1.3 + awayWinProb * 0.7)) * 100).toFixed(1),
+                    draw: (((drawProb * 1.3) / (homeWinProb * 0.7 + drawProb * 1.3 + awayWinProb * 0.7)) * 100).toFixed(1),
+                    away: (((awayWinProb * 0.7) / (homeWinProb * 0.7 + drawProb * 1.3 + awayWinProb * 0.7)) * 100).toFixed(1)
+                },
+                goals: this.calculateOverUnderFromExpected(expectedTotal * 0.45, 'halfTime'),
+                btts: {
+                    btts_yes: (this.calculateBTTSProbability(homeAnalysis, awayAnalysis) * 0.6).toFixed(1),
+                    btts_no: (100 - this.calculateBTTSProbability(homeAnalysis, awayAnalysis) * 0.6).toFixed(1)
+                }
             },
-            btts: {
-                btts_yes: '54.0',
-                btts_no: '46.0'
+            // AGGIUNTO: Probabilità 1X2 per secondo tempo
+            secondHalf: {
+                '1X2': {
+                    home: (((homeWinProb * 0.8) / (homeWinProb * 0.8 + drawProb * 1.1 + awayWinProb * 0.85)) * 100).toFixed(1),
+                    draw: (((drawProb * 1.1) / (homeWinProb * 0.8 + drawProb * 1.1 + awayWinProb * 0.85)) * 100).toFixed(1),
+                    away: (((awayWinProb * 0.85) / (homeWinProb * 0.8 + drawProb * 1.1 + awayWinProb * 0.85)) * 100).toFixed(1)
+                },
+                goals: this.calculateOverUnderFromExpected(expectedTotal * 0.55, 'secondHalf'),
+                btts: {
+                    btts_yes: (this.calculateBTTSProbability(homeAnalysis, awayAnalysis) * 0.7).toFixed(1),
+                    btts_no: (100 - this.calculateBTTSProbability(homeAnalysis, awayAnalysis) * 0.7).toFixed(1)
+                }
             },
             h2hData: null,
-            confidence: 68,
-            dataSource: 'team_statistics'
+            confidence: 65,
+            dataSource: 'recent_form_analysis',
+            formBreakdown: {
+                home: {
+                    matches: homeMatches.length,
+                    winRate: (homeAnalysis.winRate * 100).toFixed(1) + '%',
+                    avgGoals: homeAnalysis.avgGoalsFor.toFixed(2),
+                    form: homeAnalysis.formString
+                },
+                away: {
+                    matches: awayMatches.length,
+                    winRate: (awayAnalysis.winRate * 100).toFixed(1) + '%',
+                    avgGoals: awayAnalysis.avgGoalsFor.toFixed(2),
+                    form: awayAnalysis.formString
+                }
+            }
         };
     }
     
-    static getGenericProbabilities() {
+    // Helper per analizzare partite di una squadra
+    static analyzeTeamMatches(matches, teamId, isHome) {
+        let wins = 0, draws = 0, losses = 0;
+        let goalsFor = 0, goalsAgainst = 0, bttsCount = 0;
+        const formChars = [];
+        
+        matches.forEach(match => {
+            const isHomeInMatch = match.home_team_id === teamId;
+            const ourGoals = isHomeInMatch ? match.home_goals : match.away_goals;
+            const theirGoals = isHomeInMatch ? match.away_goals : match.home_goals;
+            
+            goalsFor += ourGoals;
+            goalsAgainst += theirGoals;
+            
+            if (ourGoals > 0 && theirGoals > 0) bttsCount++;
+            
+            if (ourGoals > theirGoals) {
+                wins++;
+                formChars.push('W');
+            } else if (ourGoals < theirGoals) {
+                losses++;
+                formChars.push('L');
+            } else {
+                draws++;
+                formChars.push('D');
+            }
+        });
+        
         return {
-            '1X2': {
-                home: '46.0',
-                draw: '26.0',
-                away: '28.0'
+            winRate: matches.length > 0 ? wins / matches.length : 0,
+            drawRate: matches.length > 0 ? draws / matches.length : 0,
+            avgGoalsFor: matches.length > 0 ? goalsFor / matches.length : 0,
+            avgGoalsAgainst: matches.length > 0 ? goalsAgainst / matches.length : 0,
+            bttsRate: matches.length > 0 ? bttsCount / matches.length : 0,
+            formString: formChars.join(''),
+            totalMatches: matches.length
+        };
+    }
+    
+    // Helper per calcolare Over/Under da gol attesi
+    static calculateOverUnderFromExpected(expectedGoals, period) {
+        const thresholds = [0.5, 1.5, 2.5, 3.5];
+        const result = { expectedTotal: expectedGoals.toFixed(2) };
+        
+        thresholds.forEach(threshold => {
+            // Usa distribuzione di Poisson per calcolare probabilità
+            const overProb = this.poissonOver(expectedGoals, threshold);
+            result[`over${threshold.toString().replace('.', '')}`] = (overProb * 100).toFixed(1);
+            result[`under${threshold.toString().replace('.', '')}`] = ((1 - overProb) * 100).toFixed(1);
+        });
+        
+        return result;
+    }
+    
+    // Helper per BTTS da analisi squadre
+    static calculateBTTSProbability(homeAnalysis, awayAnalysis) {
+        // Probabilità che la casa segni * probabilità che l'away segni
+        const homeScoringProb = Math.min(0.95, Math.max(0.3, homeAnalysis.avgGoalsFor / 2.5));
+        const awayScoringProb = Math.min(0.95, Math.max(0.25, awayAnalysis.avgGoalsFor / 2.5));
+        
+        return homeScoringProb * awayScoringProb * 100;
+    }
+    
+    // Approssimazione di Poisson per Over/Under
+    static poissonOver(lambda, threshold) {
+        if (lambda <= 0) return 0;
+        
+        // Per semplicità, usa approssimazione normale per lambda > 10
+        if (lambda > 10) {
+            const mean = lambda;
+            const std = Math.sqrt(lambda);
+            return 1 - this.normalCDF((threshold + 0.5 - mean) / std);
+        }
+        
+        // Calcolo esatto per lambda piccoli
+        let cumulative = 0;
+        let term = Math.exp(-lambda);
+        
+        for (let k = 0; k <= threshold; k++) {
+            cumulative += term;
+            term = term * lambda / (k + 1);
+        }
+        
+        return Math.max(0, Math.min(1, 1 - cumulative));
+    }
+    
+    // Approssimazione CDF normale
+    static normalCDF(x) {
+        return 0.5 * (1 + this.erf(x / Math.sqrt(2)));
+    }
+    
+    // Approssimazione funzione errore
+    static erf(x) {
+        const a1 = 0.254829592;
+        const a2 = -0.284496736;
+        const a3 = 1.421413741;
+        const a4 = -1.453152027;
+        const a5 = 1.061405429;
+        const p = 0.3275911;
+        
+        const sign = x >= 0 ? 1 : -1;
+        x = Math.abs(x);
+        
+        const t = 1.0 / (1.0 + p * x);
+        const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+        
+        return sign * y;
+    }
+    
+    // Fallback generico MIGLIORATO
+    static getEnhancedGenericProbabilities() {
+        return {
+            fullTime: {
+                '1X2': { home: '46.0', draw: '26.0', away: '28.0' },
+                goals: {
+                    expectedTotal: '2.65',
+                    over05: '88.0', under05: '12.0',
+                    over15: '72.0', under15: '28.0',
+                    over25: '56.0', under25: '44.0',
+                    over35: '32.0', under35: '68.0'
+                },
+                btts: { btts_yes: '52.0', btts_no: '48.0' }
             },
-            goals: {
-                expectedTotal: '2.65',
-                over25: '56.0',
-                under25: '44.0'
+            halfTime: {
+                '1X2': { home: '35.0', draw: '42.0', away: '23.0' },
+                goals: {
+                    expectedTotal: '1.20',
+                    over05: '65.0', under05: '35.0',
+                    over15: '28.0', under15: '72.0',
+                    over25: '8.0', under25: '92.0',
+                    over35: '2.0', under35: '98.0'
+                },
+                btts: { btts_yes: '32.0', btts_no: '68.0' }
             },
-            btts: {
-                btts_yes: '52.0',
-                btts_no: '48.0'
+            // AGGIUNTO: Probabilità complete per secondo tempo
+            secondHalf: {
+                '1X2': { home: '38.0', draw: '35.0', away: '27.0' },
+                goals: {
+                    expectedTotal: '1.45',
+                    over05: '72.0', under05: '28.0',
+                    over15: '42.0', under15: '58.0',
+                    over25: '18.0', under25: '82.0',
+                    over35: '6.0', under35: '94.0'
+                },
+                btts: { btts_yes: '38.0', btts_no: '62.0' }
             },
             h2hData: null,
             confidence: 45,
-            dataSource: 'generic_fallback'
+            dataSource: 'enhanced_generic_fallback'
         };
     }
     
