@@ -10,12 +10,10 @@ const PORT = process.env.PORT || 3001;
 
 const path = require('path');
 
-// Servi file statici React (dopo altre route)
-app.use(express.static(path.join(__dirname, 'client/build')));
+app.use(express.static(path.resolve(__dirname, 'client', 'dist')));
 
-// Catch all handler per React Router
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'client/build/index.html'));
+  res.sendFile(path.resolve(__dirname, 'client', 'dist', 'index.html'));
 });
 
 app.use(cors());
