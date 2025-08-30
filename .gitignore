@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 *.bak
 *.backup
+*.db
 *.tmp
 *.temp
 .env
