@@ -1257,7 +1257,7 @@ app.get('/api/db-stats', (req, res) => {
 function getTimeInfo(match) {
     const matchDate = new Date(match.utcDate);
     const now = new Date();
-    const diff = Math.ceil((matchDate - now) / (24 * 60 * 60 * 1000));
+    const diff = Math.floor((matchDate - now) / (24 * 60 * 60 * 1000));
     
     if (match.status === 'FINISHED') return 'Terminata';
     if (diff < 0) return 'Passata';
