@@ -8,14 +8,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const path = require('path');
-
-app.use(express.static(path.resolve(__dirname, 'client', 'dist')));
-
-app.get('*', (req, res) => {
-  res.sendFile(path.resolve(__dirname, 'client', 'dist', 'index.html'));
-});
-
 app.use(cors());
 app.use(express.json());
 
@@ -1279,6 +1271,16 @@ function getTimeInfo(match) {
 setInterval(() => {
     db.run(`DELETE FROM cache_simple WHERE expires_at < datetime('now')`);
 }, 3600000);
+
+const path = require('path');
+
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.resolve(__dirname, 'client', 'dist')));
+
+    app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, 'client', 'dist', 'index.html'));
+    });
+}
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {

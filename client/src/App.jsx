@@ -6,7 +6,11 @@ import './App.css';
 // ===========================================
 // CONFIGURAZIONE API BACKEND
 // ===========================================
-const API_BASE_URL = 'https://football-odds-analyzer-pro.onrender.com/api';
+const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+const API_BASE_URL = isDevelopment 
+  ? 'http://localhost:3001/api'
+  : `${window.location.origin}/api`;
 
 const api = axios.create({
   baseURL: API_BASE_URL,
